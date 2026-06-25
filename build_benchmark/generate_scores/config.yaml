@@ -1,0 +1,11 @@
+hf_datasets:
+  original_targets_dataset: "<hf_dataset_selected_queries>" # this dataset contains the targets with indices to the respective candidates as chosen by our algorithm
+  original_candidates_dataset: "<hf_dataset_selected_documents" # this dataset contains the candidates to the chosen targets as in our algorithm
+  targets_with_relevances_dataset: "<hf_output_queries_with_scores"
+prompts_pairwise_comparison:
+  conf-score: "prompts/prompt_conf_score.txt"
+  no-ties: "prompts/prompt_no_ties.txt"
+  ties-allowed: "prompts/prompt_with_ties.txt"
+swiss_tournament:
+  num_rounds: 20
+  matches_save_file: "matches_results_swiss.csv"

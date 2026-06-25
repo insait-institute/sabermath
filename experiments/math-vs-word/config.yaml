@@ -1,0 +1,8 @@
+hf_datasets:
+    original_targets: "RAG4Math/targets_relevances_computed" # this dataset must contain the targets with the computed relevance scores for each candidate
+    original_candidates: "RAG4Math/balanced_selection_candidates_reduced" # this dataset must contain the set of all candidates
+    targets_fixed_latex: "RAG4Math/targets_fixed_latex" # this dataset will contain the targets with additional keys: the fixed latex problem and solution
+    candidates_fixed_latex: "RAG4Math/candidates_fixed_latex" # this dataset will contain the candidates with additional keys: the fixed latex problem and solution
+    targets_maths_words_fixed: "RAG4Math/targets_fixed_filtered_latex" # this dataset will contain the targets with additional keys containing only the mathematical equations and only the text content of the problem and solution
+    candidates_maths_words_fixed: "RAG4Math/candidates_fixed_filtered_latex" # this dataset will contain the candidates with additional keys containing only the mathematical equations and only the text content of the problem and solution
+

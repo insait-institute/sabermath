@@ -1,0 +1,22 @@
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python
+  - pip
+postinstall: |
+    pip install openai==2.6.1
+    pip install datasets
+    pip install tqdm
+    pip install vllm
+    pip install pre-commit
+    pip install sentence-transformers
+    pip install numpy
+    pip install pandas
+    pip install psutil
+    pip install scikit-learn
+    pip install PyYAML
+    pip install loguru
+    pip install httpx
+    pip install requests
+    pip install transformers

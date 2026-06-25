@@ -1,0 +1,19 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pandas
+  - numpy
+  - pip:
+    - datasets
+    - loguru
+    - openai
+    - anthropic
+    - together
+    - google-genai
+    - tqdm
+    - requests
+    - transformers
+    - vllm

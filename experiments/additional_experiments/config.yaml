@@ -1,0 +1,13 @@
+hf_datasets:
+  original_targets_dataset:   '<dataset>' # this dataset contains the targets with indices to the respective candidates as chosen by our algorithm
+  original_candidates_dataset: "<dataset>" # this dataset contains the candidates to the chosen targets as in our algorithm
+  targets_relevances_computed: "<dataset>"
+  targets_human_eval: "<dataset>"
+prompts_pairwise_comparison:
+  conf-score: "prompts/prompt_conf_score.txt"
+  no-ties: "prompts/prompt_no_ties.txt"
+  ties-allowed: "prompts/prompt_with_ties.txt"
+prompts_other:
+  ordinal: "prompts/prompt_ordinal_rank.txt"
+swiss_tournament:
+  matches_save_file: "matches_res_save.csv"

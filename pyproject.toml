@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sabermath"
+description = "SABER-Math: A Benchmark for Deep Mathematical understanding of Embedding models"
+requires-python = ">=3.10"
+dynamic = ["version"]
+license = {text = "MIT"}
+
+dependencies = [
+    "sentence-transformers>=5.4.1",
+    "numpy>=2.2.6,<2.3; python_version < '3.11'",
+    "numpy>=2.4.4; python_version >= '3.11'",
+    "tqdm>=4.67.3",
+    "datasets>=4.8.5"
+]
+
+[project.optional-dependencies]
+vllm = [
+    "vllm>=0.11.0"
+]
+
+apis = [
+    "google-genai>=1.74.0",
+    "openai>=2.33.0"
+]
+
+legacy = [
+    "scikit-learn>=1.7,<1.8; python_version < '3.11'",
+    "scikit-learn>=1.7; python_version >= '3.11'",
+    "rank-bm25>=0.2.2",
+    "pya0==0.3.7; platform_system == 'Linux'"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "sabermath.__version__.__version__" }

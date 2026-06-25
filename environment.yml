@@ -1,0 +1,12 @@
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.14
+  - pip
+postinstall: |
+    pip install black
+    pip install datasets
+    pip install torch
+    pip install numpy
+    pip install pre-commit

@@ -1,0 +1,17 @@
+microsoft/harrier-oss-v1-270m --driver vllm
+microsoft/harrier-oss-v1-0.6b --driver vllm
+Qwen/Qwen3-Embedding-4B --driver vllm
+Qwen/Qwen3-Embedding-8B --driver vllm
+BAAI/bge-m3 --driver vllm
+Qwen/Qwen3-Embedding-0.6B --driver vllm
+nvidia/llama-embed-nemotron-8b --driver vllm
+tencent/KaLM-Embedding-Gemma3-12B-2511 --driver vllm
+FacebookAI/roberta-base --driver st --encode-kwargs '{"chunk_to_context": true}'
+google-bert/bert-base-uncased --driver st --encode-kwargs '{"chunk_to_context": true}'
+google/embeddinggemma-300m --driver st
+intfloat/multilingual-e5-large --driver st --encode-kwargs '{"chunk_to_context": true}'
+microsoft/harrier-oss-v1-27b --driver vllm
+jinaai/jina-embeddings-v5-text-nano --driver st --init-kwargs '{"trust_remote_code":true,"device":"cuda","model_kwargs":{"dtype":"bfloat16"}}'
+jinaai/jina-embeddings-v5-text-small --driver st --init-kwargs '{"trust_remote_code":true,"device":"cuda","model_kwargs":{"dtype":"bfloat16"}}'
+Octen/Octen-Embedding-4B --driver vllm
+Octen/Octen-Embedding-8B --driver vllm

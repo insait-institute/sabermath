@@ -1,0 +1,14 @@
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.14
+  - pip
+postinstall: |
+    pip install openai==2.6.1
+    pip install datasets
+    pip install tqdm
+    pip install vllm
+    pip install pre-commit
+    pip install ~/rank-embedding-math/fastbma
+    pip install sentence-transformers

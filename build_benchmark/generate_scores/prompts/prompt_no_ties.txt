@@ -1,0 +1,83 @@
+You are an expert mathematician and analytical-reasoning engine. Your job is to decide which of two sample problems (Sample 1 or Sample 2) is *conceptually closer* to a target problem, judged by the *mathematical ideas and solution techniques actually used* (not surface wording).
+
+  You will receive 3 complete items, each with BOTH a problem statement and its correct solution:
+
+  [Target]
+  - Problem: {target_problem}
+  - Correct Solution: {target_solution}
+
+  [Sample 1]
+  - Problem: {sample1_problem}
+  - Correct Solution: {sample1_solution}
+
+  [Sample 2]
+  - Problem: {sample2_problem}
+  - Correct Solution: {sample2_solution}
+
+  Your output must follow the steps and formatting rules below exactly.
+
+  --------
+  STEP 1 - Technique Extraction (do this for Target, Sample 1, Sample 2)
+  For each item, read the Problem + Correct Solution together, then produce a structured list containing:
+
+  A. Core topic tags (2-6 tags)
+    Examples: "modular arithmetic", "similar triangles", "graph invariants", "generating functions", "optimization via calculus", "AM-GM", "inclusion-exclusion".
+
+  B. Key tools / theorems / lemmas explicitly used
+    Name the theorem/identity/strategy when possible (e.g., "Pigeonhole Principle", "Cauchy-Schwarz", "Euclidean algorithm", "double counting", "invariant/monovariant", "casework", "recurrence + induction").
+
+  C. Primary solution moves (3-8 bullets)
+    Describe the actual moves that drive the solution, e.g.:
+    - "rewrite expression into telescoping sum"
+    - "introduce substitution of variable to linearize"
+    - "construct auxiliary line and apply angle chase"
+    - "count objects in two ways; equate counts"
+    - "prove monotonicity; then bound endpoints"
+
+  D. Structural signature (1-3 sentences)
+    Summarize the solution's backbone: what is introduced, what is transformed, and what final step seals the result.
+
+  Label these sections clearly as:
+  - Target: Technique Profile
+  - Sample 1: Technique Profile
+  - Sample 2: Technique Profile
+
+  --------
+  STEP 2 - Comparative Analysis
+  Compare each sample to the target using *deep* similarity signals:
+
+  1) Technique overlap:
+    - Are the same kinds of tools central (not merely mentioned)?
+    - Are the same transformations used (e.g., factoring vs. symmetry/invariants vs. counting)?
+
+  2) Problem structure alignment:
+    - Are the same intermediate objects introduced (auxiliary point, substitution, generating function, invariant quantity, etc.)?
+    - Do both require the same "shape" of argument (e.g., construction + chase, or setup of recurrence + induction, or extremal argument + contradiction)? This criterion should be weighted lower than the technique overlap but can be a tie-breaker when techniques are similar.
+
+  3) Difficulty is NOT the criterion:
+    - Prefer shared method and structure over "hard/easy".
+
+  4) Penalize superficial similarity:
+    - Do NOT reward matching variable names, story context, or domain language if the underlying method differs. Further, algebraic computations do not imply similarity if the core method is different, or if the algebra is just a technical detail rather than the main driver.
+
+  Produce two subsections:
+  - Sample 1 vs Target -- Similarities / Differences / Overall Match Score (qualitative)
+  - Sample 2 vs Target -- Similarities / Differences / Overall Match Score (qualitative)
+
+  --------
+  STEP 3 - Decision + Tie-break rules
+  Choose the sample that is fundamentally closer in methods and structure.
+
+  If it's close, use these tie-breakers in order:
+  1) The sample whose *main* technique is the same as the target's main technique.
+  2) The sample whose *sequence of moves* (setup -> transformation -> key lemma -> finish) matches more closely.
+  3) The sample that relies on the same representation (e.g., algebraic manipulation vs. geometric configuration vs. combinatorial counting vs. graph reasoning).
+
+  --------
+  OUTPUT FORMAT (must follow)
+  - You may include your extracted profiles and comparisons above.
+  - Output your final decision on the last line, formatted as either:
+
+  $\\boxed{{1}}$ -> corresponding to the first sample being more similar to the target,
+  or
+  $\\boxed{{2}}$ -> corresponding to the second sample being more similar to the target."""
