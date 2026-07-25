@@ -5,11 +5,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from .base import ModelProcessor
 
+from .tokenization_helper import math_word_tokens
 
 class TfidfProcessor(ModelProcessor):
     processor: ClassVar[str | None] = "tf-idf"
 
-    def __init__(self, **vectorizer_kwargs) -> None:
+    def __init__(self, tokenize_approach0: bool = True, **vectorizer_kwargs) -> None:
+        self.tokenize_approach0 = tokenize_approach0
         self.vectorizer_kwargs = vectorizer_kwargs
 
     @property
@@ -27,10 +29,19 @@ class TfidfProcessor(ModelProcessor):
         if not documents:
             return []
 
-        vectorizer = TfidfVectorizer(
-            **self.vectorizer_kwargs,
-            **kwargs,
-        )
+        if self.tokenize_approach0:
+            vectorizer = TfidfVectorizer(
+                tokenizer=math_word_tokens,
+                token_pattern=None,
+                lowercase=False,
+                preprocessor=None,
+                **self.vectorizer_kwargs,
+                **kwargs,
+            )
+        else:
+            # Matches the old TfidfProcessor: no custom tokenizer at all, so
+            # sklearn's own defaults (regex tokenization + lowercasing) apply.
+            vectorizer = TfidfVectorizer(**self.vectorizer_kwargs, **kwargs)
 
         doc_vectors = vectorizer.fit_transform(documents)
         query_vector = vectorizer.transform([query])
