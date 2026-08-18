@@ -1,0 +1,27 @@
+# For: rank1-32b, qwen3-embedding-8b (both only need vllm + this package).
+# Package list carried over as-is from rag-math-test/rank-embedding-math/
+# running-rerankers/rank1.yml, which was already verified working.
+#
+# vllm and flashinfer-python are PINNED - confirmed the hard way that
+# leaving them unpinned is not safe: a later env rebuild (fresh conda env,
+# e.g. after a SLURM requeue lands on a node that's never built this env
+# before) silently pulled vllm 0.27.0, which pulled in a flashinfer-python
+# release incompatible with this Python's typing behavior
+# (flashinfer/comm/fd_exchange.py has a bare `-> tuple[tuple[int, int,
+# array.array[int]]]` return annotation, evaluated eagerly at import time;
+# `array.array` doesn't support that subscript, so *importing* flashinfer
+# crashed with `TypeError: type 'array.array' is not subscriptable` - not a
+# bug in this repo's own code at all). vllm==0.26.0 / flashinfer-python==0.6.14
+# is the last combination confirmed working end-to-end (a real 100+ query
+# rank1-32b run completed cleanly on it). Bump deliberately, not by omission,
+# and re-verify before trusting a bump.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install numpy datasets transformers "vllm==0.26.0" "flashinfer-python==0.6.14"
+  pip install -e "$SABERMATH_REPO"

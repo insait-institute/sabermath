@@ -1,0 +1,25 @@
+# For: reason-embed-qwen3-8b, diver-retriever-4b, rader-14b.
+#
+# All three are plain bi-encoder embedding models (confirmed against each
+# model's own card/paper - none is a cross-encoder), so they run through
+# sabermath's generic SentenceTransformersProcessor path (see GENERIC_MODELS
+# in run_rerankers.py) - no custom Processor needed, unlike rank1/Qwen3-
+# Reranker/ColBERT/ReasonIR/SPLADE.
+#
+# transformers is floored (not exact-pinned) to the same >=4.51.0 already
+# used for qwen3-reranker-8b's env, since these are all Qwen3/Qwen2.5-based
+# architectures needing at least that version. Unlike env_reasonir.yml/
+# env_colbert.yml, there's no known conflicting exact-pin requirement here to
+# defend against - but this has NOT yet been verified end-to-end the way
+# those envs eventually were (real model load + real score), so run a small
+# --n smoke test per model before trusting a full run.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install "transformers>=4.51.0" "sentence-transformers>=5.4.1" torch datasets numpy peft
+  pip install -e "$SABERMATH_REPO"

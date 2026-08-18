@@ -1,0 +1,12 @@
+# For: splade-code-8b. Package list carried over from
+# running-rerankers/splade.yml.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install datasets numpy sentence_transformers peft
+  pip install -e "$SABERMATH_REPO"

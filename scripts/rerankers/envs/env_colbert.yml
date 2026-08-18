@@ -1,0 +1,27 @@
+# For: gte-moderncolbert, reason-moderncolbert (both need pylate).
+# Package list carried over from running-rerankers/reason_colbert.yml.
+#
+# Confirmed the hard way (both ColBERT models silently produced an
+# {"error": ...} result instead of real scores - SLURM still reported
+# "COMPLETED" since the shell itself exited 0): "pip install -U pylate"
+# always grabs the newest pylate, but pylate==1.6.0 declares an EXACT
+# dependency on sentence-transformers==5.3.0, and `pip install -e .` right
+# after it (satisfying this package's own sentence-transformers>=5.4.1
+# floor) silently upgrades past that, breaking
+# pylate.models.Dense.from_sentence_transformers() with
+# `KeyError: 'activation_function'`. Re-pinning sentence-transformers back
+# down as the LAST postinstall step fixes it - verified end-to-end (a real
+# ColBERT model load + score) against this exact combination. pylate itself
+# is also now pinned so a future "latest" pylate doesn't reintroduce this
+# same class of break without it being a deliberate, re-verified bump.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install "pylate==1.6.0" datasets numpy
+  pip install -e "$SABERMATH_REPO"
+  pip install "sentence-transformers==5.3.0"

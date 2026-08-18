@@ -1,0 +1,12 @@
+# For: qwen3-reranker-8b (Qwen/Qwen3-Reranker-8B needs transformers>=4.51.0).
+# Package list carried over from running-rerankers/qwen3_reranker.yml.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install "transformers>=4.51.0" torch datasets numpy
+  pip install -e "$SABERMATH_REPO"

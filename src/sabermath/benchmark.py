@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import Callable, Literal, get_args
 from pathlib import Path
+import json
 import re
 
 import numpy as np
@@ -34,6 +35,39 @@ def _ensure_dir(file_path: str | Path) -> None:
     parent = path.parent
     if parent != Path():
         parent.mkdir(parents=True, exist_ok=True)
+
+
+def _load_checkpoint(path: str | Path | None) -> dict[int, float | None]:
+    """Load a per-query nDCG checkpoint written by a previous (possibly
+    interrupted) evaluate_task() run. Returns {} if there is none yet, or if
+    the file is missing/corrupt (e.g. killed mid-write before the atomic
+    rename below could apply) - a bad checkpoint should never crash a run,
+    only cost it a restart from scratch."""
+    if path is None:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {int(k): v for k, v in raw.items()}
+
+
+def _save_checkpoint(
+    path: str | Path | None, all_ndcgs_by_idx: dict[int, float | None]
+) -> None:
+    """Persist per-query nDCGs computed so far. Writes to a temp file and
+    renames it into place so a job killed mid-write can never leave a
+    truncated/corrupt checkpoint behind."""
+    if path is None:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps({str(k): v for k, v in all_ndcgs_by_idx.items()}))
+    tmp.replace(p)
 
 
 def _naive_type_check(obj, module: str, name: str) -> bool:
@@ -95,7 +129,27 @@ def evaluate_task(
     name: Task,
     settings: TaskSettings,
     return_ndcgs: bool = False,
+    checkpoint_path: str | Path | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> TaskResult:
+    """Evaluate one task.
+
+    If `checkpoint_path` is given, per-query nDCGs are written to it after
+    every query and reloaded from it on entry, so a run interrupted partway
+    (e.g. a SLURM job hitting its wall-clock limit) can be resumed by calling
+    evaluate_task() again with the same checkpoint_path instead of losing all
+    progress and restarting from query 0. This matters most for slow,
+    generative rerankers (e.g. rank1-32b) evaluated over hundreds of queries.
+    Do not reuse a checkpoint path across a differently-sized/ordered
+    queries_ds (e.g. after changing a query subsample) - the checkpoint is
+    keyed by query position, not by query content.
+
+    If `on_progress` is given, it's called (no args) right after every
+    freshly-computed (not resumed-and-skipped) query's checkpoint write -
+    e.g. to periodically snapshot partial results to a separate location, or
+    push them somewhere else. What it does is entirely up to the caller;
+    this file has no opinion on it.
+    """
     queries_ds = settings.queries_ds
     documents_ds = settings.documents_ds
     processor = settings.processor
@@ -104,20 +158,30 @@ def evaluate_task(
     show_progress_bar = settings.show_progress_bar
     scores_kwargs = settings.scores_kwargs
 
-    ndcgs = []
-    all_ndcgs = []
-    ndcg_by_query_idx = {}
-
     query_version = "full" if name == "full-full" else "statement"
     document_version = "statement" if name == "statement-statement" else "full"
 
     queries = transform(queries_ds, query_version)
+
+    all_ndcgs_by_idx: dict[int, float | None] = _load_checkpoint(checkpoint_path)
+    ndcg_by_query_idx: dict[int, float] = {
+        i: v for i, v in all_ndcgs_by_idx.items() if v is not None
+    }
+
+    if all_ndcgs_by_idx:
+        print(
+            f"[~] Resuming task '{name}' from checkpoint: "
+            f"{len(all_ndcgs_by_idx)}/{len(queries)} queries already scored."
+        )
 
     for i, query in tqdm(
         enumerate(queries),
         total=len(queries),
         disable=not show_progress_bar,
     ):
+        if i in all_ndcgs_by_idx:
+            continue  # already scored - loaded from checkpoint
+
         doc_ids = list(queries_ds[i]["candidates"])
         relevance_scores = list(queries_ds[i]["relevance_scores"])
 
@@ -130,22 +194,28 @@ def evaluate_task(
         )
 
         if model_scores is None:
-            all_ndcgs.append(None)
-            continue
+            all_ndcgs_by_idx[i] = None
+        else:
+            model_ranked_local_idxs = np.argsort(-np.asarray(model_scores))
 
-        model_ranked_local_idxs = np.argsort(-np.asarray(model_scores))
+            model_ranked_relevance_scores = np.asarray(relevance_scores)[
+                model_ranked_local_idxs
+            ]
+            ndcg = compute_ndcg_at_k(
+                model_ranked_relevance_scores, k=k, variant=dcg_variant
+            )
+            all_ndcgs_by_idx[i] = ndcg
+            ndcg_by_query_idx[i] = ndcg
 
-        model_ranked_relevance_scores = np.asarray(relevance_scores)[
-            model_ranked_local_idxs
-        ]
-        ndcg = compute_ndcg_at_k(
-            model_ranked_relevance_scores, k=k, variant=dcg_variant
-        )
-        ndcgs.append(ndcg)
-        all_ndcgs.append(ndcg)
-        ndcg_by_query_idx[i] = ndcg
+        # Written after every query so a killed job loses at most the query
+        # currently in flight, never the whole task's progress.
+        _save_checkpoint(checkpoint_path, all_ndcgs_by_idx)
 
-    ndcgs = np.asarray(ndcgs)
+        if on_progress is not None:
+            on_progress()
+
+    all_ndcgs = [all_ndcgs_by_idx.get(i) for i in range(len(queries))]
+    ndcgs = np.asarray(list(ndcg_by_query_idx.values()))
     ndcg_at_k = float(ndcgs.mean()) if ndcgs.size > 0 else 0.0
 
     BRANCHES = get_args(Branch)
@@ -231,6 +301,15 @@ def evaluate(
     use_vllm: bool = False,
     init_kwargs: dict | None = None,
     scores_kwargs: dict | None = None,
+    # Resume Config: if set, per-query nDCGs are checkpointed to
+    # "{checkpoint_dir}/{task}.json" after every query and reloaded from
+    # there on start, so an interrupted run (e.g. a SLURM job timeout) can be
+    # resumed instead of restarting from query 0. Don't reuse a
+    # checkpoint_dir across runs with a different queries_ds (e.g. after
+    # changing --n / a query subsample) - checkpoints are keyed by query
+    # position, not content.
+    checkpoint_dir: str | Path | None = None,
+    on_progress: Callable[[], None] | None = None,
     # Printing Config
     verbose: bool = True,
     show_progress_bars: bool = True,
@@ -315,9 +394,20 @@ def evaluate(
 
     ndcgs = {}
 
+    def _checkpoint_path(task_name: str) -> str | None:
+        if checkpoint_dir is None:
+            return None
+        return str(Path(checkpoint_dir) / f"{task_name}.json")
+
     if "statement-statement" in tasks:
         vprint('[~] Evaluating on task "statement vs. statement"...')
-        st_st_res, st_st_ndcgs = evaluate_task("statement-statement", settings, True)
+        st_st_res, st_st_ndcgs = evaluate_task(
+            "statement-statement",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("statement-statement"),
+            on_progress=on_progress,
+        )
         ndcgs["statement-statement"] = st_st_ndcgs
         ndcg_at_k = st_st_res.ndcg_at_k
         vprint(f"[+] Statement-statement nDCG@{k} ({dcg_variant}): {ndcg_at_k}")
@@ -325,7 +415,13 @@ def evaluate(
 
     if "statement-full" in tasks:
         vprint('[~] Evaluating on task "statement vs. full statement + solution"...')
-        st_fl_res, st_fl_ndcgs = evaluate_task("statement-full", settings, True)
+        st_fl_res, st_fl_ndcgs = evaluate_task(
+            "statement-full",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("statement-full"),
+            on_progress=on_progress,
+        )
         ndcgs["statement-full"] = st_fl_ndcgs
         ndcg_at_k = st_fl_res.ndcg_at_k
         vprint(f"[+] Statement-full nDCG@{k} ({dcg_variant}): {ndcg_at_k}")
@@ -336,7 +432,13 @@ def evaluate(
             '[~] Evaluating on task "full problem + solution vs. '
             'full problem + solution"...'
         )
-        fl_fl_res, fl_fl_ndcgs = evaluate_task("full-full", settings, True)
+        fl_fl_res, fl_fl_ndcgs = evaluate_task(
+            "full-full",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("full-full"),
+            on_progress=on_progress,
+        )
         ndcgs["full-full"] = fl_fl_ndcgs
         ndcg_at_k = fl_fl_res.ndcg_at_k
         vprint(f"[+] Full-full nDCG@{k} ({dcg_variant}): {ndcg_at_k}")
