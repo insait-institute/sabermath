@@ -41,7 +41,10 @@ legacy = [
 rerankers = [
     "pylate>=1.0",
     "transformers>=4.51.0",
-    "torch>=2.2"
+    "torch>=2.2",
+    # RaDeR's reranker ships as a LoRA SEQ_CLS adapter - see
+    # src/sabermath/processors/rader_reranker_processor.py.
+    "peft>=0.14"
 ]
 
 [tool.setuptools.packages.find]

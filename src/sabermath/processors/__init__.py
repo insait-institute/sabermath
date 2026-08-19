@@ -38,3 +38,5 @@ from .qwen3_reranker_processor import Qwen3RerankerProcessor
 from .colbert_processor import ColBERTProcessor
 from .reasonir_processor import ReasonIRProcessor
 from .splade_processor import SpladeProcessor
+from .grouprank_processor import GroupRankProcessor
+from .rader_reranker_processor import RaDeRRerankerProcessor
