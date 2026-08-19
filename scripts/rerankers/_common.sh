@@ -75,6 +75,18 @@ else
   echo "WARNING: no HF token found (.hftok or ~/.cache/huggingface/token) - gated HF models may fail to download. See scripts/rerankers/README.md."
 fi
 
+# Same .<name>tok-file pattern as .hftok above, for the timing harness's
+# closed-API models (scripts/measure_query_time.py). Neither is needed by
+# anything else in this repo, so a missing file here is silent (no
+# warning) - only measure_query_time.py's own gemini-embedding-*/
+# text-embedding-3-* jobs actually need these.
+if [[ -f .openroutertok ]]; then
+  export OPENROUTER_API_KEY="$(cat .openroutertok)"
+fi
+if [[ -f .geminitok ]]; then
+  export GEMINI_API_KEY="$(cat .geminitok)"
+fi
+
 num_gpus=$(echo "$SLURM_GPUS_ON_NODE" | grep -o '[0-9]*' | head -1)
 num_gpus="${num_gpus:-1}"
 export CUDA_VISIBLE_DEVICES="$(seq -s, 0 $((num_gpus - 1)))"
