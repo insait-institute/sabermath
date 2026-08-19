@@ -1,0 +1,19 @@
+# For: gemini-embedding-001, gemini-embedding-2, text-embedding-3-small,
+# text-embedding-3-large (the timing harness's closed/API category - see
+# scripts/measure_query_time.py).
+#
+# These four need sabermath's "apis" extra (google-genai, openai - see
+# pyproject.toml). Requires OPENAI_API_KEY and GEMINI_API_KEY/
+# GOOGLE_API_KEY to be set (see scripts/rerankers/_common.sh's .hftok-style
+# fallback pattern - no equivalent wired up for these yet, since neither
+# key has been provided). Base deps come along automatically with the
+# extra, same as env_classical.yml.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install -e "$SABERMATH_REPO[apis]"
