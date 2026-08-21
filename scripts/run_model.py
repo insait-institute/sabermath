@@ -343,13 +343,9 @@ def main() -> None:
                 f"HuggingFace models. Ignoring it for: {', '.join(non_hf)}"
             )
         else:
-            if use_vllm:
-                print(
-                    "[WARNING] Models requiring vector accumulation "
-                    "(marked with *) are currently not supported by vLLM. "
-                    "Switching to SentenceTransformers."
-                )
-            use_vllm = False
+            # chunk_to_context is supported by BOTH drivers since 2026-08-20
+            # (VLLMProcessor.encode grew the same client-side chunk+mean the
+            # ST path always had), so '*' no longer force-disables vLLM.
             encode_kwargs["chunk_to_context"] = True
 
     failures: list[tuple[str, int | None]] = []

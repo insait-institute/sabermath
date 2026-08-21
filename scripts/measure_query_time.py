@@ -2,59 +2,83 @@
 the SaberMath benchmark's results tables (rerankers, bi-encoder embedding
 models - open and closed/API - and classical/lexical baselines).
 
-Does NOT modify any existing processor or run_rerankers.py - this is a
-separate, standalone measurement harness with its own methodology, agreed
-on separately from the correctness-focused nDCG runs:
+METHODOLOGY (revised 2026-08-20 alongside the vLLM-default rollout; the
+previous revision's "rerankers keep their native batching" and
+"qwen3-embedding-8b deliberately timed on SentenceTransformers" rules are
+superseded):
 
-  1. Rerankers are run normally - their own native batching is untouched
-     (e.g. rank1-32b's one batched vllm.generate() call over all
-     candidates, qwen3-reranker-8b's batch_size=8, splade's batch_size=4).
+  1. Every model is timed on its PRODUCTION backend - the exact processor
+     construction run_rerankers.py / run_model.py uses (the reranker-pipeline
+     models are literally built through run_rerankers.py's own builder
+     tables, so the two can never drift apart). Since 2026-08-20 that means
+     vLLM for most neural models; see results/vllm_feasibility/summary.json
+     for the per-model validation of those backends.
 
-  2. Embedding models (bi-encoder, open HF or closed/API) have their
-     amortization effect removed: every one of the N_QUERIES sampled
-     queries is scored from a cold cache - no candidate document
-     embedding is precomputed or reused across queries - via
-     EmbeddingProcessor's own existing check_cache=False/update_cache=False
-     kwargs (no processor code changes needed, this flag already existed).
+  2. All executions are standardized to SIMILAR PARALLELISM CONDITIONS:
+     16 documents in flight / per processing step (BATCH_SIZE below), rather
+     than each model's own tuned default. Concretely:
+       - vLLM models: candidates are submitted in slices of 16 per
+         embed/score/classify/generate call. CAVEAT: vLLM still
+         micro-batches/schedules internally within a slice - this caps
+         request-level parallelism at 16, it does not impose lockstep
+         batches the way a padded HF forward does.
+       - rank1-*: the production single batched generate over all ~150
+         candidates is sliced into 16-prompt calls. CAVEAT: reasoning-chain
+         lengths vary wildly, so each slice waits on its slowest member -
+         sliced timing reads WORSE than production's one big call would.
+       - diver-grouprank-32b: group_size=20 (docs per prompt) is the model's
+         official SCORING protocol, not a batching knob - changing it
+         changes scores, so it stays 20; only the generate calls over
+         group-prompts are sliced at 16 (a single slice in practice).
+       - HF/SentenceTransformers models (splade, colbert, jina-v5-nano):
+         true batch_size=16 (splade's old 1/4 defaults were an OOM guard for
+         the 8B on long docs - if 16 OOMs on a node, rerun at the largest
+         working size and note it in the result).
+       - Closed APIs: "16 documents in flight", client-side.
+         text-embedding-3-* have no batch API (one HTTP request per doc) ->
+         max_concurrency=16. gemini-embedding-001 -> one 16-doc request at a
+         time (batch_size=16, max_concurrency=1, the closest analog to a
+         local batch loop). gemini-embedding-2 -> the API forces 1 doc per
+         request, so 16 concurrent single-doc requests (max_concurrency=16;
+         GoogleProcessor honors an explicitly passed value exactly since
+         2026-08-20). CAVEAT: the provider's server-side batching is opaque -
+         only the client side is standardized.
+       - Classical baselines: bm25/tf-idf/jaccard score in 16-doc slices
+         against an index/vectorizer fit on the FULL candidate set
+         (score_batch_size=16 - scores identical, verified; corpus statistics
+         are never chunked). That is the PROTOCOL side; the actual
+         parallelism bound for CPU methods is the 16-lane thread cap below.
+         Per-doc worker threads were considered and rejected: jaccard is
+         pure-Python set arithmetic (the GIL serializes threads), bm25/
+         tf-idf per-doc scoring is microseconds of vectorized work (thread
+         overhead would dominate the measurement), and either way it would
+         time an implementation production never runs. approach0 is the one
+         GENUINE EXCEPTION: it delegates to pya0's search engine, which
+         exposes no per-doc scoring hook to slice - it runs unmodified.
+       - CPU thread cap: scripts/timing/run_timing.slurm exports
+         OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS=16 for EVERY timing job, so no
+         method (BLAS-backed classical scoring included) uses more than 16
+         parallel CPU lanes - the CPU-side counterpart of the 16-doc GPU
+         batch budget, applied uniformly.
 
-  3. Those same embedding models are forced to batch_size=16 wherever
-     parallelization is meaningful, standardizing the throughput
-     assumption across models that would otherwise each use their own
-     tuned default. Two documented exceptions, not silent overrides:
-       - OpenAIProcessor has no batch_size concept at all (one HTTP
-         request per document, concurrency-limited) - max_concurrency=16
-         is used instead as the closest analogous "parallelism fixed at
-         16" knob.
-       - GoogleProcessor already hardcodes batch_size=1 internally for
-         gemini-embedding-2 specifically (existing code, not touched
-         here) - batch_size=16 is still passed for consistency, but that
-         model-specific override downgrades it regardless.
+  3. Embedding models (bi-encoder, open or closed/API) have their
+     amortization effect removed: every one of the N_QUERIES sampled queries
+     is scored from a cold cache (check_cache=False/update_cache=False) - no
+     candidate document embedding is reused across queries.
 
-  4. Everything is meant to run on a single H200 GPU node (see
+  4. Everything runs on a single H200 GPU node (see
      scripts/timing/run_timing.slurm) - including the classical/closed-API
      models, which don't need the GPU themselves, for node/environment
      consistency.
 
   5. Model loading is excluded from the timed region. Only the time from
      "start scoring this query's candidates" to "have the final sorted
-     ranking" is measured, per query.
-
-Classical/lexical methods (bm25, tf-idf, jaccard, approach0) have no
-caching or batching concept at all - confirmed by reading each processor
-directly: TfidfProcessor refits its vectorizer fresh on every call,
-BM25Processor/Approach0Processor rebuild their index fresh on every call.
-They're just called plainly - "whenever parallelization is possible"
-correctly excludes them.
-
-No warmup query - every one of the N_QUERIES sampled queries is timed,
-including the first (deliberately, per instruction - a model whose first
-call pays a one-time JIT/CUDA-graph-capture cost will show that in its
-per-query numbers, not have it silently discarded).
+     ranking" is measured, per query. No warmup query - a model whose first
+     call pays a one-time JIT/CUDA-graph cost shows that in its numbers.
 
 Task is fixed to statement-full (query="statement" version, i.e. the bare
 "problem" field; documents="full" version, i.e. "Problem: ...\n\nSolution:
-...") - the paper's main setting, matching what the nDCG results already
-reported use.
+...") - the paper's main setting, matching the nDCG results.
 
 Usage:
     python scripts/measure_query_time.py --model rank1-32b
@@ -87,20 +111,22 @@ from sabermath.processors import (
     EmbeddingProcessor,
     GoogleProcessor,
     JaccardProcessor,
-    Qwen3RerankerProcessor,
-    Rank1Processor,
-    ReasonIRProcessor,
     SentenceTransformersProcessor as STProcessor,
     SpladeProcessor,
     TfidfProcessor,
+    VLLMProcessor,
 )
 
-# Reuses the already-verified lasttoken-pooling fix instead of duplicating
-# it here - see run_rerankers.py's own _build_rader_14b_processor docstring
-# for why rader-14b specifically needs this (its HF repo ships no
-# sentence-transformers module config to auto-detect at all, which
-# silently produced the wrong pooling mode when loaded generically).
-from run_rerankers import _build_rader_14b_processor  # noqa: E402
+# The reranker-pipeline models are built through run_rerankers.py's OWN
+# production builder tables (single source of truth - point 1 of the
+# methodology): rank1-*, diver-grouprank-32b, qwen3-reranker-*,
+# rader-reranker-7b, reasonir-8b, rader-3b/7b/14b via CUSTOM_MODEL_BUILDERS,
+# and qwen3-embedding-8b, reason-embed-qwen3-8b, diver-retriever-4b/0.6b via
+# GENERIC_MODELS.
+from run_rerankers import (  # noqa: E402
+    CUSTOM_MODEL_BUILDERS as PRODUCTION_CUSTOM_BUILDERS,
+    GENERIC_MODELS as PRODUCTION_GENERIC_MODELS,
+)
 
 # --- how many queries to average over per model. Also overridable via
 # --n-queries. ---
@@ -109,17 +135,15 @@ N_QUERIES = 50
 TASK_QUERY_VERSION = "statement"
 TASK_DOC_VERSION = "full"
 SEED = 42
-BATCH_SIZE = 16  # standardized encode-call batch size for embedding models
+BATCH_SIZE = 16  # the standardized documents-in-flight count (see docstring)
 
 
 class OpenRouterEmbeddingProcessor(EmbeddingProcessor):
     """text-embedding-3-small/large via OpenRouter instead of OpenAI
     directly - requested explicitly (OpenRouter key supplied instead of an
     OpenAI one). sabermath.processors.OpenAIProcessor has no way to point
-    at a custom base_url, and per this harness's own "don't modify
-    existing processors" rule, this replicates its exact async
-    batching/retry logic here instead of touching that file, just with a
-    different base_url and the OpenRouter model-id convention
+    at a custom base_url; this replicates its async batching/retry logic
+    with a different base_url and the OpenRouter model-id convention
     (provider-prefixed, e.g. "openai/text-embedding-3-small" - confirmed
     directly: OpenRouter exposes an OpenAI-API-compatible /v1/embeddings
     endpoint, verified with a real embeddings.create() call before wiring
@@ -213,194 +237,118 @@ class OpenRouterEmbeddingProcessor(EmbeddingProcessor):
         )
 
 
-def _st(model_name: str, extra_model_kwargs: dict | None = None):
-    """Plain bi-encoder via the generic SentenceTransformersProcessor path,
-    same trust_remote_code=True/model_kwargs={"torch_dtype": "auto"}
-    convention already used for reason-embed-qwen3-8b/diver-retriever-4b
-    in run_rerankers.py's GENERIC_MODELS. extra_model_kwargs merges in on
-    top of that default (used by the jina-embeddings-v5-* entries below,
-    which additionally need default_task set)."""
-    model_kwargs = {"torch_dtype": "auto"}
-    if extra_model_kwargs:
-        model_kwargs.update(extra_model_kwargs)
+def _production_custom(key: str):
+    """The exact processor run_rerankers.py builds in production (tp=1)."""
+    return lambda: PRODUCTION_CUSTOM_BUILDERS[key](1)
+
+
+def _production_generic(key: str):
+    """The exact processor benchmark.py's _make_processor builds for a
+    GENERIC_MODELS entry (all four are use_vllm=True since 2026-08-20)."""
+    spec = PRODUCTION_GENERIC_MODELS[key]
+    assert spec.get("use_vllm"), f"{key} is no longer vLLM-backed - update timing"
+    return lambda: VLLMProcessor.from_huggingface(
+        spec["model"], **spec.get("init_kwargs", {})
+    )
+
+
+def _vllm(repo: str, **init_kwargs):
+    """models.txt-style plain vLLM embedding load (run_model.py
+    --driver vllm)."""
+    return lambda: VLLMProcessor.from_huggingface(repo, **init_kwargs)
+
+
+def _jina_nano_st():
+    """The one remaining SentenceTransformers model (EuroBERT backbone,
+    vLLM-infeasible) - exact production kwargs from scripts/models.txt,
+    including default_task=retrieval (current jina remote code refuses to
+    encode without a task at all)."""
     return STProcessor.from_huggingface(
-        model_name,
+        "jinaai/jina-embeddings-v5-text-nano",
         trust_remote_code=True,
-        model_kwargs=model_kwargs,
+        device="cuda",
+        model_kwargs={"dtype": "bfloat16", "default_task": "retrieval"},
     )
 
 
-def _build_gemma3_text_embedding_processor(model_name: str):
-    """microsoft/harrier-oss-v1-27b and tencent/KaLM-Embedding-Gemma3-12B-2511:
-    both Gemma3-based text-only bi-encoders. Loading either through ANY path
-    that constructs sentence_transformers' own
-    sentence_transformers.sentence_transformer.modules.Transformer -
-    including the plain SentenceTransformer(model_name) auto-load AND the
-    rader-14b-style explicit modules.Transformer(model_name) construction -
-    crashes, because that class unconditionally calls
-    AutoProcessor.from_pretrained() in __init__ (sentence-transformers==5.7.0,
-    base/modules/transformer.py L671 - no parameter skips it). transformers
-    routes gemma3's model_type to a multimodal Processor mapping that then
-    tries to load an image processor config neither text-only repo ships:
-        OSError: Can't load image processor for '<repo>' ...
-    Confirmed directly: a bare AutoProcessor.from_pretrained() call on both
-    repos reproduces this exact error, while AutoTokenizer.from_pretrained()
-    on the same repos works fine (it has no image-processor path at all) -
-    which is all a text-only bi-encoder actually needs. _RawTextTransformer
-    below is a minimal drop-in that only ever touches AutoTokenizer/
-    AutoModel, sidestepping AutoProcessor (and this whole crash) entirely.
-
-    pooling_mode="lasttoken" and the trailing L2-normalize are not a guess -
-    both repos' own 1_Pooling/config.json (pooling_mode_lasttoken: true) and
-    modules.json (a 2_Normalize module) were fetched and read directly
-    rather than assumed from the model cards.
-    """
-    from sentence_transformers import SentenceTransformer
-    from sentence_transformers.sentence_transformer import modules
-    from transformers import AutoModel, AutoTokenizer
-
-    class _RawTextTransformer(modules.InputModule):
-        save_in_root = True
-
-        def __init__(self):
-            super().__init__()
-            self._auto_model = AutoModel.from_pretrained(
-                model_name, trust_remote_code=True, torch_dtype="auto"
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name, trust_remote_code=True
-            )
-
-        def preprocess(self, inputs, prompt=None, **kwargs):
-            if prompt:
-                inputs = self._prepend_prompt(inputs, prompt)
-            return dict(
-                self.tokenizer(
-                    list(inputs), padding=True, truncation=True, return_tensors="pt"
-                )
-            )
-
-        def forward(self, features, **kwargs):
-            model_inputs = {
-                k: v
-                for k, v in features.items()
-                if k in ("input_ids", "attention_mask", "token_type_ids")
-            }
-            outputs = self._auto_model(**model_inputs)
-            features["token_embeddings"] = outputs.last_hidden_state
-            return features
-
-        def get_embedding_dimension(self) -> int:
-            return self._auto_model.config.hidden_size
-
-        def save(self, output_path, *args, **kwargs):
-            raise NotImplementedError(
-                "_RawTextTransformer is timing-harness-only and not meant to be saved."
-            )
-
-    transformer = _RawTextTransformer()
-    pooling = modules.Pooling(
-        transformer.get_embedding_dimension(), pooling_mode="lasttoken"
-    )
-    normalize = modules.Normalize()
-    st = SentenceTransformer(modules=[transformer, pooling, normalize])
-    return STProcessor(st, model_name)
-
-
-def _build_octen_processor(model_name: str):
-    """Octen/Octen-Embedding-4B and -8B: sentence-transformers==5.7.0's
-    Normalize module (sentence_transformer/modules/normalize.py) no longer
-    accepts ANY constructor argument - it just always L2-normalizes
-    unconditionally now. Both Octen repos still ship a
-    2_Normalize/config.json with the old {"normalize_embeddings": true}
-    kwarg (confirmed directly by fetching each repo's own file), which the
-    generic auto-loading path tries to pass into Normalize(**config) and
-    crashes with a TypeError. Unlike harrier-oss-v1-27b/
-    kalm-embedding-gemma3-12b-2511 above, Octen's own Transformer module
-    loads fine on its own (these are Qwen-based, not Gemma3 - no
-    AutoProcessor image-processor issue), so this only needs to skip
-    loading that one broken Normalize config, not bypass AutoProcessor.
-    pooling_mode="lasttoken" per each repo's own 1_Pooling/config.json
-    (pooling_mode_lasttoken: true), fetched directly rather than assumed.
-    """
-    from sentence_transformers import SentenceTransformer
-    from sentence_transformers.sentence_transformer import modules
-
-    transformer = modules.Transformer(
-        model_name,
-        model_kwargs={"trust_remote_code": True, "torch_dtype": "auto"},
-        config_kwargs={"trust_remote_code": True},
-    )
-    pooling = modules.Pooling(
-        transformer.get_embedding_dimension(), pooling_mode="lasttoken"
-    )
-    normalize = modules.Normalize()
-    st = SentenceTransformer(modules=[transformer, pooling, normalize])
-    return STProcessor(st, model_name)
-
+# Pooler/init recipes for the models.txt "--driver vllm" lines - keep in sync
+# with scripts/models.txt (validated in scripts/test_vllm_feasibility.py).
+_CHUNK512_POOLER = {"pooling_type": "MEAN", "normalize": False}
 
 RERANKER_BUILDERS = {
-    "rank1-32b": lambda: Rank1Processor(tensor_parallel_size=1),
-    "qwen3-reranker-8b": lambda: Qwen3RerankerProcessor(),
-    "splade-code-8b": lambda: SpladeProcessor(),
-    "gte-moderncolbert": lambda: ColBERTProcessor("lightonai/GTE-ModernColBERT-v1"),
-    "reason-moderncolbert": lambda: ColBERTProcessor("lightonai/Reason-ModernColBERT"),
+    "rank1-32b": _production_custom("rank1-32b"),
+    "rank1-7b": _production_custom("rank1-7b"),
+    "rank1-0.5b": _production_custom("rank1-0.5b"),
+    "qwen3-reranker-8b": _production_custom("qwen3-reranker-8b"),
+    "qwen3-reranker-4b": _production_custom("qwen3-reranker-4b"),
+    "qwen3-reranker-0.6b": _production_custom("qwen3-reranker-0.6b"),
+    # splade/colbert stay on their (non-vLLM) production backends; batch
+    # standardization happens at the constructor since their batching knobs
+    # live there (recorded in the result JSON via builder_batching below).
+    "splade-code-8b": lambda: SpladeProcessor(
+        query_batch_size=BATCH_SIZE, document_batch_size=BATCH_SIZE
+    ),
+    "splade-code-0.6b": lambda: SpladeProcessor(
+        "naver/splade-code-06B",
+        query_batch_size=BATCH_SIZE,
+        document_batch_size=BATCH_SIZE,
+    ),
+    "gte-moderncolbert": lambda: ColBERTProcessor(
+        "lightonai/GTE-ModernColBERT-v1", encode_batch_size=BATCH_SIZE
+    ),
+    "reason-moderncolbert": lambda: ColBERTProcessor(
+        "lightonai/Reason-ModernColBERT", encode_batch_size=BATCH_SIZE
+    ),
+    "rader-reranker-7b": _production_custom("rader-reranker-7b"),
+    "diver-grouprank-32b": _production_custom("diver-grouprank-32b"),
 }
 
 EMBEDDING_BUILDERS = {
-    # Our own already-integrated bi-encoders.
-    "reasonir-8b": lambda: ReasonIRProcessor(),
-    "reason-embed-qwen3-8b": lambda: _st("hanhainebula/reason-embed-qwen3-8b-0928"),
-    "diver-retriever-4b": lambda: _st("AQ-MedAI/Diver-Retriever-4B"),
-    "rader-14b": lambda: _build_rader_14b_processor(),
-    # qwen3-embedding-8b: deliberately uses the plain SentenceTransformer
-    # path here, NOT VLLMProcessor - unlike the production reranker
-    # pipeline (which uses vLLM for throughput on the full 1000-query
-    # run). vLLM manages its own internal batching/scheduling; it doesn't
-    # expose a client-side batch_size the way ST's .encode(batch_size=...)
-    # does, and standardizing batch_size=16 across every embedding model
-    # is the entire point of this harness. This is a deliberate,
-    # documented deviation from the production model choice, not an
-    # oversight.
-    "qwen3-embedding-8b": lambda: _st("Qwen/Qwen3-Embedding-8B"),
-    "qwen3-embedding-4b": lambda: _st("Qwen/Qwen3-Embedding-4B"),
-    "qwen3-embedding-0.6b": lambda: _st("Qwen/Qwen3-Embedding-0.6B"),
-    "harrier-oss-v1-270m": lambda: _st("microsoft/harrier-oss-v1-270m"),
-    "harrier-oss-v1-0.6b": lambda: _st("microsoft/harrier-oss-v1-0.6b"),
-    "harrier-oss-v1-27b": lambda: _build_gemma3_text_embedding_processor(
-        "microsoft/harrier-oss-v1-27b"
+    # Reranker-pipeline bi-encoders: production builders, verbatim.
+    "reasonir-8b": _production_custom("reasonir-8b"),
+    "reason-embed-qwen3-8b": _production_generic("reason-embed-qwen3-8b"),
+    "diver-retriever-4b": _production_generic("diver-retriever-4b"),
+    "diver-retriever-0.6b": _production_generic("diver-retriever-0.6b"),
+    "rader-3b": _production_custom("rader-3b"),
+    "rader-7b": _production_custom("rader-7b"),
+    "rader-14b": _production_custom("rader-14b"),
+    "qwen3-embedding-8b": _production_generic("qwen3-embedding-8b"),
+    # models.txt "--driver vllm" table models (plain loads).
+    "qwen3-embedding-4b": _vllm("Qwen/Qwen3-Embedding-4B"),
+    "qwen3-embedding-0.6b": _vllm("Qwen/Qwen3-Embedding-0.6B"),
+    "harrier-oss-v1-270m": _vllm("microsoft/harrier-oss-v1-270m"),
+    "harrier-oss-v1-0.6b": _vllm("microsoft/harrier-oss-v1-0.6b"),
+    "harrier-oss-v1-27b": _vllm("microsoft/harrier-oss-v1-27b"),
+    "bge-m3": _vllm("BAAI/bge-m3"),
+    "llama-embed-nemotron-8b": _vllm("nvidia/llama-embed-nemotron-8b"),
+    "kalm-embedding-gemma3-12b-2511": _vllm("tencent/KaLM-Embedding-Gemma3-12B-2511"),
+    "embeddinggemma-300m": _vllm("google/embeddinggemma-300m"),
+    "jina-embeddings-v5-text-small": _vllm("jinaai/jina-embeddings-v5-text-small"),
+    "octen-embedding-4b": _vllm("Octen/Octen-Embedding-4B"),
+    "octen-embedding-8b": _vllm("Octen/Octen-Embedding-8B"),
+    # models.txt chunked trio - pooler + 512 context, chunk kwargs come via
+    # MODEL_SCORES_KWARGS below.
+    "roberta-base": _vllm(
+        "FacebookAI/roberta-base",
+        pooler_config=dict(_CHUNK512_POOLER),
+        max_model_len=512,
     ),
-    "bge-m3": lambda: _st("BAAI/bge-m3"),
-    "llama-embed-nemotron-8b": lambda: _st("nvidia/llama-embed-nemotron-8b"),
-    "kalm-embedding-gemma3-12b-2511": lambda: _build_gemma3_text_embedding_processor(
-        "tencent/KaLM-Embedding-Gemma3-12B-2511"
+    "bert-base-uncased": _vllm(
+        "google-bert/bert-base-uncased",
+        pooler_config=dict(_CHUNK512_POOLER),
+        export_clean=True,
+        max_model_len=512,
     ),
-    "roberta-base": lambda: _st("FacebookAI/roberta-base"),
-    "bert-base-uncased": lambda: _st("google-bert/bert-base-uncased"),
-    "embeddinggemma-300m": lambda: _st("google/embeddinggemma-300m"),
-    "multilingual-e5-large": lambda: _st("intfloat/multilingual-e5-large"),
-    "jina-embeddings-v5-text-nano": lambda: _st(
-        "jinaai/jina-embeddings-v5-text-nano", {"default_task": "retrieval"}
+    "multilingual-e5-large": _vllm(
+        "intfloat/multilingual-e5-large",
+        pooler_config={"pooling_type": "MEAN", "normalize": True},
+        max_model_len=512,
     ),
-    "jina-embeddings-v5-text-small": lambda: _st(
-        "jinaai/jina-embeddings-v5-text-small", {"default_task": "retrieval"}
-    ),
-    "octen-embedding-4b": lambda: _build_octen_processor("Octen/Octen-Embedding-4B"),
-    "octen-embedding-8b": lambda: _build_octen_processor("Octen/Octen-Embedding-8B"),
+    # The one ST holdout (EuroBERT backbone - vLLM-infeasible, see
+    # scripts/models.txt).
+    "jina-embeddings-v5-text-nano": _jina_nano_st,
 }
 
-# Closed/API embedding models. NOTE on why these build GoogleProcessor/
-# OpenAIProcessor directly rather than going through a bare model-name
-# string: experiments/confidence_intervals/confidence.py lists these exact
-# strings (e.g. "gemini-embedding-001") in its own cached_models and calls
-# sabermath.evaluate(model, use_vllm=use_vllm, ...) on them - but grepping
-# that file shows `use_vllm` is never actually defined anywhere in it (it
-# would raise NameError if run), and even if it were, a bare string only
-# ever resolves to STProcessor/VLLMProcessor in benchmark.py's
-# _make_processor() - neither of which is correct for an API model
-# identifier that isn't an HF repo path. So this harness builds the right
-# processor directly instead of relying on that apparently-nonfunctional
-# auto-dispatch.
 CLOSED_API_BUILDERS = {
     "gemini-embedding-001": lambda: GoogleProcessor("gemini-embedding-001"),
     "gemini-embedding-2": lambda: GoogleProcessor("gemini-embedding-2"),
@@ -424,25 +372,68 @@ ALL_BUILDERS = {
     **{k: (v, "classical") for k, v in CLASSICAL_BUILDERS.items()},
 }
 
+# --- per-model scoring kwargs implementing methodology points 2 and 3 ---
 
-def _md5(s: str) -> str:
-    return hashlib.md5(s.encode("utf-8")).hexdigest()
+_NO_CACHE = {"check_cache": False, "update_cache": False}
+
+# Category baselines...
+_CATEGORY_SCORES_KWARGS = {
+    # All current reranker backends expose a get_scores batch/slice knob
+    # except splade/colbert (constructor-level, see RERANKER_BUILDERS) -
+    # overridden to {} for those below.
+    "reranker": {"batch_size": BATCH_SIZE},
+    "embedding": {**_NO_CACHE, "batch_size": BATCH_SIZE},
+    "closed_api": {**_NO_CACHE},  # per-model below - APIs differ
+    "classical": {"score_batch_size": BATCH_SIZE},
+}
+
+# ...and per-model overrides (replace the category baseline entirely).
+_MODEL_SCORES_KWARGS = {
+    # Constructor-level batching only:
+    "splade-code-8b": {},
+    "splade-code-0.6b": {},
+    "gte-moderncolbert": {},
+    "reason-moderncolbert": {},
+    # Production preprocessing protocol rides along with the batch slicing:
+    "rader-3b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
+    "rader-7b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
+    "rader-14b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
+    "roberta-base": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
+    "bert-base-uncased": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
+    "multilingual-e5-large": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
+    # Closed APIs - "16 documents in flight", per-API (see docstring):
+    "gemini-embedding-001": {**_NO_CACHE, "batch_size": BATCH_SIZE, "max_concurrency": 1},
+    "gemini-embedding-2": {**_NO_CACHE, "batch_size": 1, "max_concurrency": BATCH_SIZE},
+    "text-embedding-3-small": {**_NO_CACHE, "max_concurrency": BATCH_SIZE},
+    "text-embedding-3-large": {**_NO_CACHE, "max_concurrency": BATCH_SIZE},
+    # No per-doc scoring hook to slice (pya0 search engine) - the one genuine
+    # exception to the 16-per-step protocol:
+    "approach0": {},
+}
+
+# Batching applied at construction time rather than get_scores - recorded in
+# the result JSON so no setting is invisible in the output.
+_BUILDER_BATCHING_NOTE = {
+    "splade-code-8b": f"query_batch_size={BATCH_SIZE}, document_batch_size={BATCH_SIZE} (constructor)",
+    "splade-code-0.6b": f"query_batch_size={BATCH_SIZE}, document_batch_size={BATCH_SIZE} (constructor)",
+    "gte-moderncolbert": f"encode_batch_size={BATCH_SIZE} (constructor)",
+    "reason-moderncolbert": f"encode_batch_size={BATCH_SIZE} (constructor)",
+    "diver-grouprank-32b": "group_size=20 kept (scoring protocol, not batching); generate calls sliced at 16",
+    "approach0": "NOT sliceable: pya0 search engine, no per-doc scoring hook",
+    "gemini-embedding-2": "API forces batch_size=1; 16 concurrent single-doc requests instead",
+    "text-embedding-3-small": "no batch API; max_concurrency=16 as the parallelism analog",
+    "text-embedding-3-large": "no batch API; max_concurrency=16 as the parallelism analog",
+}
 
 
 def _get_scores_kwargs(category: str, model_key: str) -> dict:
-    if category in ("reranker", "classical"):
-        return {}
-    if category == "embedding":
-        return {"check_cache": False, "update_cache": False, "batch_size": BATCH_SIZE}
-    if category == "closed_api":
-        if model_key.startswith("text-embedding"):
-            return {
-                "check_cache": False,
-                "update_cache": False,
-                "max_concurrency": BATCH_SIZE,
-            }
-        return {"check_cache": False, "update_cache": False, "batch_size": BATCH_SIZE}
-    raise ValueError(f"unknown category {category!r}")
+    if model_key in _MODEL_SCORES_KWARGS:
+        return dict(_MODEL_SCORES_KWARGS[model_key])
+    return dict(_CATEGORY_SCORES_KWARGS[category])
+
+
+def _md5(s: str) -> str:
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 
 def _sync_cuda() -> None:
@@ -580,6 +571,8 @@ def main() -> None:
 
     scores_kwargs = _get_scores_kwargs(category, args.model)
     print(f"[~] get_scores kwargs for this run: {scores_kwargs}")
+    if args.model in _BUILDER_BATCHING_NOTE:
+        print(f"[~] builder-level batching: {_BUILDER_BATCHING_NOTE[args.model]}")
 
     per_query_seconds = []
     measured_idxs = []
@@ -618,12 +611,15 @@ def main() -> None:
     result = {
         "model": args.model,
         "category": category,
+        "backend": getattr(processor, "processor", None),
         "task": f"{TASK_QUERY_VERSION}-{TASK_DOC_VERSION}",
         "n_queries_requested": sample["n_queries_requested"],
         "n_queries_measured": len(per_query_seconds),
         "seed": sample["seed"],
         "query_idxs": measured_idxs,
+        "standardized_batch_size": BATCH_SIZE,
         "scores_kwargs": scores_kwargs,
+        "builder_batching": _BUILDER_BATCHING_NOTE.get(args.model),
         "per_query_seconds": per_query_seconds,
         "mean_seconds": float(arr.mean()) if len(arr) else None,
         "median_seconds": float(np.median(arr)) if len(arr) else None,
