@@ -1,8 +1,10 @@
-"""Evaluate the SABER-Math rerankers that need custom scoring logic (rank1,
-Qwen3-Reranker, GTE-ModernColBERT, Reason-ModernColBERT, ReasonIR, SPLADE),
-plus Qwen3-Embedding-8B (which already runs through the generic HuggingFace
-path), across all three tasks (statement-statement, statement-full,
-full-full).
+"""Evaluate the SABER-Math rerankers that need custom scoring logic (rank1
+0.5B/7B/32B, Qwen3-Reranker 0.6B/4B/8B, GTE-ModernColBERT,
+Reason-ModernColBERT, ReasonIR, SPLADE-code 0.6B/8B, RaDeR bi-encoders
+3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B), plus the models that run
+through the generic HuggingFace path (Qwen3-Embedding-8B,
+Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B), across all three tasks
+(statement-statement, statement-full, full-full).
 
 Each model/task run is checkpointed after every query to
 "<save-to>/.checkpoints/<model>/<subset>/<task>.json" (see
@@ -19,15 +21,16 @@ testing/compute_confidence_intervals.py can be pointed at the output
 directory (or individual files) to get per-task, per-domain 95% CIs (normal
 + bootstrap) for free - no separate stats code needed for these models.
 
-IMPORTANT - dependency isolation: rank1 (vllm), Qwen3-Reranker
-(transformers>=4.51.0), ReasonIR (transformers==4.47.1, per its model card
-pin), GTE/Reason-ModernColBERT (pylate) and SPLADE (sentence-transformers'
-SparseEncoder) have overlapping-but-conflicting package requirements (see
-running-rerankers/*.yml in rag-math-test for the environments that were
-already verified to work per model). Do not install all of them into one
-shared venv/conda env and run the full --models list in a single process;
-instead run this script once per model (or per compatible model family) from
-that model's own environment, e.g.:
+IMPORTANT - dependency isolation: since the 2026-08-20 vLLM-default rollout
+most models here run from ONE environment, scripts/rerankers/envs/
+env_vllm_feas.yml (vllm==0.26.0 pinned + peft for rader-reranker-7b's
+one-off LoRA merge): rank1, diver-grouprank, every qwen3-reranker,
+reasonir-8b, the rader bi-encoders + reranker, and all four GENERIC_MODELS.
+Only two families still need their own envs - GTE/Reason-ModernColBERT
+(pylate pins sentence-transformers==5.3.0, env_colbert.yml) and SPLADE
+(SparseEncoder, env_splade.yml). env_st_biencoders.yml remains only for the
+LEGACY reference paths (scripts/test_vllm_feasibility.py). Still run this
+script once per model (or per same-env family), each in its own process:
 
     python scripts/run_rerankers.py --models rank1-32b
     python scripts/run_rerankers.py --models reasonir-8b
@@ -68,11 +71,16 @@ from sabermath import evaluate
 from sabermath.data import load_data
 from sabermath.processors import (
     ColBERTProcessor,
+    GroupRankProcessor,
     Qwen3RerankerProcessor,
+    Qwen3RerankerVLLMProcessor,
+    RaDeRRerankerProcessor,
+    RaDeRRerankerVLLMProcessor,
     Rank1Processor,
     ReasonIRProcessor,
     SentenceTransformersProcessor as STProcessor,
     SpladeProcessor,
+    VLLMProcessor,
 )
 from sabermath.schemas import Branch, Task
 
@@ -91,107 +99,252 @@ ALL_TASKS = list(get_args(Task))
 # tensor parallelism). The other models below are single-process HF/pylate
 # calls that don't shard across GPUs at all, so --tensor-parallel-size is
 # simply ignored for them too (see _run_one).
-RADER_14B_MODEL_NAME = "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes"
+# RaDeR bi-encoder retrievers (the size-ablation family from the same
+# collection - 3B/7B/14B all share the recipe below; each card's own vLLM
+# serving snippet confirms `pooling_type=LAST, normalize=true` for every
+# size).
+RADER_BIENCODER_MODELS = {
+    "rader-3b": "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes",
+    "rader-7b": "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes",
+    "rader-14b": "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes",
+}
+# NOTE the repo-name inconsistency above is real and verified against the HF
+# API: the 3B uses an underscore ("Qwen25_3B"), the 7B/14B a hyphen
+# ("Qwen25-7B"/"Qwen25-14B").
 
 
-def _build_rader_14b_processor():
-    """Raderspace/RaDeR_Qwen25-14B_...: ships NO sentence-transformers module
-    config at all (no modules.json / config_sentence_transformers.json /
-    1_Pooling/config.json - confirmed by listing the actual repo). Loading
-    it via the generic `SentenceTransformer(model_name)` path therefore
-    falls back to sentence-transformers' own default (mean pooling) - but
-    the model's own card explicitly says to serve it via vLLM with
-    `pooling_type=LAST, normalize=true`. Confirmed the hard way: a full run
-    under that wrong mean-pooling fallback scored statement-full
-    nDCG@10=0.4126 against a reference value of 0.488, a far larger gap than
-    every other model in this pipeline - and chunking (the earlier OOM fix)
-    and precision were both ruled out as the cause (only 0.32% of documents
-    even exceed the 2048-token chunk cutoff). Building the
-    Transformer+Pooling stack explicitly instead of relying on
+def _build_rader_biencoder_processor(model_name: str):
+    """LEGACY (reference-only since 2026-08-20): the production default for
+    the RaDeR bi-encoders is now _build_rader_biencoder_vllm below - vLLM is
+    each card's own recommended serving AND was verified to match raw-HF
+    last-token embeddings exactly (scripts/test_vllm_feasibility.py), while
+    this ST path needed two hard-won fixes (lasttoken pooling, chat-template
+    modality stripping) to get there. Kept importable because the
+    feasibility harness's frozen reference recipes mirror it.
+
+    Raderspace/RaDeR_Qwen25-*: these repos ship NO sentence-transformers
+    module config at all (no modules.json / config_sentence_transformers.json
+    / 1_Pooling/config.json - confirmed by listing the actual repos, for all
+    three sizes). Loading one via the generic `SentenceTransformer(name)`
+    path therefore falls back to sentence-transformers' own default (mean
+    pooling) - but each model's own card explicitly says to serve it via
+    vLLM with `pooling_type=LAST, normalize=true`. Confirmed the hard way on
+    the 14B: a full run under that wrong mean-pooling fallback scored
+    statement-full nDCG@10=0.4126 against a reference value of 0.488, a far
+    larger gap than every other model in this pipeline - and chunking (the
+    earlier OOM fix) and precision were both ruled out as the cause (only
+    0.32% of documents even exceed the 2048-token chunk cutoff). Building
+    the Transformer+Pooling stack explicitly instead of relying on
     auto-detection, so lasttoken pooling actually gets used.
     """
     from sentence_transformers import SentenceTransformer
     from sentence_transformers.sentence_transformer import modules
 
     transformer = modules.Transformer(
-        RADER_14B_MODEL_NAME,
+        model_name,
         model_kwargs={"trust_remote_code": True, "torch_dtype": "auto"},
         config_kwargs={"trust_remote_code": True},
     )
+    # Strip the auto-inferred "message" modality: because these Qwen2.5-based
+    # repos ship a chat template in their tokenizer, sentence-transformers
+    # (>=5.7, incl. the pinned 5.7.0) routes even plain strings through
+    # apply_chat_template - a 13-token text becomes 39 tokens of
+    # <|im_start|>system...<|im_end|> markup, so "lasttoken" pools the
+    # template's trailing newline instead of the last content token.
+    # Confirmed the hard way on 2026-08-19 via scripts/test_vllm_feasibility.py:
+    # embeddings built this way rank at Spearman 0.19-0.39 against the true
+    # last-token embeddings (raw HF forward == the models' own recommended
+    # vLLM serving, cosine 1.0000 between those two), and stripping the
+    # modality here restores exact agreement (cosine 1.0). Post-init
+    # mutation deliberately, not a constructor modality_config - the
+    # constructor path requires re-loading the full model a second time and
+    # an explicit module_output_name.
+    if "message" in getattr(transformer, "modality_config", {}):
+        transformer.modality_config = {
+            k: v for k, v in transformer.modality_config.items() if k != "message"
+        }
     pooling = modules.Pooling(
         transformer.get_embedding_dimension(), pooling_mode="lasttoken"
     )
     st = SentenceTransformer(modules=[transformer, pooling])
-    return STProcessor(st, RADER_14B_MODEL_NAME)
+    return STProcessor(st, model_name)
+
+
+def _build_rader_biencoder_vllm(model_name: str):
+    """PRODUCTION path for the RaDeR bi-encoders since 2026-08-20: vLLM with
+    the exact recipe validated against raw-HF last-token embeddings by
+    scripts/test_vllm_feasibility.py (Spearman 0.9999-1.0 vs the fixed legacy
+    reference). Every knob below is load-bearing:
+    - pooling_type=LAST per each card's own vLLM serving snippet;
+      normalize=False (not the card's normalize=true) because the production
+      protocol mean-averages UN-normalized chunk vectors before the final
+      cosine - see the legacy builder's history;
+    - dtype=bfloat16 (since 2026-08-21): bf16 is RaDeR's TRAINING precision
+      (their repo trains with --bf16; the checkpoint's torch_dtype float32
+      is just storage format) and was validated FEASIBLE against the fixed
+      legacy references (Spearman 0.9978-0.9994, |dNDCG@10| <= 0.019) while
+      running up to ~16x faster end-to-end than fp32 on the 14B. The
+      earlier "reduced precision wrecks rankings (Spearman 0.19-0.39)"
+      finding that had forced fp32 was CONFOUNDED - it was measured against
+      the chat-template-corrupted reference, and that mismatch was entirely
+      the reference bug, not dtype. NOTE on provenance: the published
+      2026-08-20 full nDCG runs were produced in fp32; the bf16 delta is
+      below the bootstrap CI half-widths;
+    - max_model_len=2080 (not 2048): chunk_to_context produces chunks of UP
+      TO exactly 2048 tokens, and prompt_len == max_model_len sat right on
+      the boundary where the engine wedge below was observed - the margin
+      removes the boundary case outright;
+    - enable_prefix_caching/enable_chunked_prefill=False: with vLLM's
+      defaults (both True) the first full-benchmark rader runs WEDGED
+      mid-statement-full (2026-08-20, jobs 727753-5 + the 730036 retry):
+      client blocked forever in core_client.get_output, EngineCore alive but
+      busy-looping with nothing scheduled, GPU at 0% until the idle reaper
+      killed the job. Non-deterministic (retry passed the previously-hung
+      query, then wedged two queries later), first appearing exactly where
+      multi-chunk (2048-token) prompts start. The bert/e5 engines - which
+      auto-run with both features off - completed every run cleanly, and
+      neither feature helps embedding workloads (our EmbeddingProcessor
+      caches per-text results anyway), so both are disabled rather than
+      diagnosed further upstream."""
+    return VLLMProcessor.from_huggingface(
+        model_name,
+        pooler_config={"pooling_type": "LAST", "normalize": False},
+        dtype="bfloat16",
+        max_model_len=2080,
+        enable_prefix_caching=False,
+        enable_chunked_prefill=False,
+    )
 
 
 CUSTOM_MODEL_BUILDERS = {
     "rank1-32b": lambda tp: Rank1Processor(tensor_parallel_size=1),
-    "qwen3-reranker-8b": lambda tp: Qwen3RerankerProcessor(),
+    # rank1 size ablations - same processor/prompt/scoring as rank1-32b,
+    # just a different HF repo. tensor_parallel_size stays pinned to 1 (see
+    # the rank1-32b note above; >1 would be pointless at these sizes anyway).
+    "rank1-7b": lambda tp: Rank1Processor("jhu-clsp/rank1-7b"),
+    "rank1-0.5b": lambda tp: Rank1Processor("jhu-clsp/rank1-0.5b"),
+    # Qwen3-Reranker family: vLLM-backed since 2026-08-20 (official model-card
+    # recipe; verified FEASIBLE vs the HF path, Spearman >= 0.999 - see
+    # scripts/test_vllm_feasibility.py). Qwen3RerankerProcessor remains the
+    # legacy reference implementation.
+    "qwen3-reranker-8b": lambda tp: Qwen3RerankerVLLMProcessor(),
+    "qwen3-reranker-4b": lambda tp: Qwen3RerankerVLLMProcessor(
+        "Qwen/Qwen3-Reranker-4B"
+    ),
+    "qwen3-reranker-0.6b": lambda tp: Qwen3RerankerVLLMProcessor(
+        "Qwen/Qwen3-Reranker-0.6B"
+    ),
     "gte-moderncolbert": lambda tp: ColBERTProcessor("lightonai/GTE-ModernColBERT-v1"),
     "reason-moderncolbert": lambda tp: ColBERTProcessor("lightonai/Reason-ModernColBERT"),
-    "reasonir-8b": lambda tp: ReasonIRProcessor(),
+    # reasonir-8b: vLLM-backed since 2026-08-20. vllm==0.26.0 has no
+    # ReasonIRModel implementation, but ReasonIR IS a bidirectional-attention
+    # Llama with mean pooling - exactly vLLM's LlamaBidirectionalModel
+    # (llama-embed-nemotron's arch), so the architecture name is remapped and
+    # the "pooling" config attr that impl reads is injected. NEAR-MATCH vs
+    # the remote-code HF path (Spearman 0.9913, |dNDCG@10| 0.0014) - the
+    # published full-run number predates this switch (legacy provenance).
+    "reasonir-8b": lambda tp: VLLMProcessor.from_huggingface(
+        "reasonir/ReasonIR-8B",
+        hf_overrides={
+            "architectures": ["LlamaBidirectionalModel"],
+            "pooling": "avg",
+        },
+        pooler_config={"pooling_type": "MEAN", "normalize": True},
+    ),
     "splade-code-8b": lambda tp: SpladeProcessor(),
-    "rader-14b": lambda tp: _build_rader_14b_processor(),
+    # NOTE the 0.6B repo really is named "splade-code-06B" (no dot) -
+    # verified against the HF API; "naver/splade-code-0.6B" does not exist.
+    "splade-code-0.6b": lambda tp: SpladeProcessor("naver/splade-code-06B"),
+    "rader-3b": lambda tp: _build_rader_biencoder_vllm(
+        RADER_BIENCODER_MODELS["rader-3b"]
+    ),
+    "rader-7b": lambda tp: _build_rader_biencoder_vllm(
+        RADER_BIENCODER_MODELS["rader-7b"]
+    ),
+    "rader-14b": lambda tp: _build_rader_biencoder_vllm(
+        RADER_BIENCODER_MODELS["rader-14b"]
+    ),
+    # RaDeR's pointwise cross-encoder reranker: vLLM-backed since 2026-08-20
+    # (one-off LoRA merge; verified FEASIBLE, Spearman 0.9968 - see
+    # RaDeRRerankerVLLMProcessor). RaDeRRerankerProcessor remains the legacy
+    # reference implementation.
+    "rader-reranker-7b": lambda tp: RaDeRRerankerVLLMProcessor(),
+    # Diver's groupwise generative reranker (vLLM) - see GroupRankProcessor.
+    # Unlike rank1-32b, tensor parallelism has no known score-corruption
+    # history for this model, so --tensor-parallel-size is honored here; the
+    # default single-GPU allocation still fits the 32B in bf16 on one H200.
+    "diver-grouprank-32b": lambda tp: GroupRankProcessor(
+        tensor_parallel_size=max(1, tp)
+    ),
 }
 
+# Custom models where --tensor-parallel-size is actually honored (everything
+# else is either pinned to 1 for correctness - rank1-32b - or a single-GPU
+# HF/PyLate call that can't shard at all).
+CUSTOM_MODELS_USE_TP = {"diver-grouprank-32b"}
+
 # Per-model scores_kwargs for CUSTOM_MODEL_BUILDERS entries (forwarded to
-# processor.get_scores(**scores_kwargs) - see _run_one). rader-14b keeps the
-# chunk_to_context fix from the earlier OOM investigation (still a real,
-# separate issue from the pooling bug above - only 0.32% of documents exceed
-# 2048 tokens, but a 14B model can still spike on those few).
+# processor.get_scores(**scores_kwargs) - see _run_one). The rader family
+# keeps chunk_to_context/context_length=2048 (the paper's preprocessing
+# protocol - only 0.32% of documents exceed 2048 tokens, but the numbers must
+# stay preprocessing-identical across backends and sizes). batch_size was
+# dropped when the family moved to vLLM (2026-08-20): it was an ST-side OOM
+# guard; vLLM schedules/batches internally.
+_RADER_BIENCODER_SCORES_KWARGS = {
+    "chunk_to_context": True,
+    "context_length": 2048,
+}
 CUSTOM_MODEL_SCORES_KWARGS = {
-    "rader-14b": {
-        "chunk_to_context": True,
-        "context_length": 2048,
-        "batch_size": 4,
-    },
+    "rader-3b": dict(_RADER_BIENCODER_SCORES_KWARGS),
+    "rader-7b": dict(_RADER_BIENCODER_SCORES_KWARGS),
+    "rader-14b": dict(_RADER_BIENCODER_SCORES_KWARGS),
 }
 
 # Already supported through evaluate()'s generic HuggingFace path - no custom
-# processor needed, just the right (model name, use_vllm) pair. tensor_parallel_size
-# is forwarded via init_kwargs since VLLMProcessor.from_huggingface passes
-# **kwargs straight through to vllm.LLM(...).
+# processor needed, just the right (model name, use_vllm) pair.
+# tensor_parallel_size is forwarded via init_kwargs since
+# VLLMProcessor.from_huggingface passes **kwargs straight through to
+# vllm.LLM(...).
 #
-# reason-embed-qwen3-8b / diver-retriever-4b are plain bi-encoder embedding
-# models (confirmed via each model's own card/paper - neither is a
-# cross-encoder), so - like qwen3-embedding-8b - they need no custom
-# Processor: use_vllm defaults to False here, which routes them through
-# SentenceTransformersProcessor's auto-detected module config (see
-# _make_processor in benchmark.py), the same cosine-similarity bi-encoder
-# path already used for reasonir-8b. (rader-14b is ALSO a bi-encoder, same
-# family, but its HF repo ships no sentence-transformers module config to
-# auto-detect at all, which silently produced the wrong pooling mode - see
-# _build_rader_14b_processor for why it needs a CUSTOM_MODEL_BUILDERS entry
-# instead of a place here.)
-# trust_remote_code=True since these are community fine-tunes, not
-# natively-registered architectures, mirroring every other custom-vendor
-# model already in this pipeline (Rank1Processor, ReasonIRProcessor, etc.).
-#
-# model_kwargs={"torch_dtype": "auto"}: without it, sentence-transformers
-# loads in fp32 by default. Confirmed the hard way for rader-14b (14B params
-# -> ~56GiB in fp32 before any activations) - OOM'd on a 140GiB H200 partway
-# through a run, mostly PyTorch allocator fragmentation from many
-# variable-shaped encode() calls, not the weights themselves. "auto" mirrors
-# the working convention already used for cached models in
-# experiments/confidence_intervals/confidence.py (there hardcoded to bf16 -
-# "auto" instead defers to each model's own declared config dtype, since
-# these models' configs haven't been individually verified to all
-# specifically want bf16).
+# All four generics are vLLM-backed since 2026-08-20 (previously only
+# qwen3-embedding-8b was; the other three ran through the auto-detected
+# SentenceTransformers path). The three Qwen3-Embedding derivatives get an
+# explicit LAST+normalize pooler override as a plain dict (VLLMProcessor
+# converts it version-tolerantly) - deterministic rather than trusting arch
+# defaults, and verified FEASIBLE against the old ST path (Spearman 0.999-1.0,
+# scripts/test_vllm_feasibility.py). trust_remote_code is
+# VLLMProcessor.from_huggingface's default, so no init kwarg needed for it;
+# the old ST-only model_kwargs/torch_dtype init kwargs would crash vllm.LLM
+# and are gone with the backend.
 GENERIC_MODELS = {
     "qwen3-embedding-8b": {"model": "Qwen/Qwen3-Embedding-8B", "use_vllm": True},
     "reason-embed-qwen3-8b": {
         "model": "hanhainebula/reason-embed-qwen3-8b-0928",
+        "use_vllm": True,
         "init_kwargs": {
-            "trust_remote_code": True,
-            "model_kwargs": {"torch_dtype": "auto"},
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
         },
     },
     "diver-retriever-4b": {
         "model": "AQ-MedAI/Diver-Retriever-4B",
+        "use_vllm": True,
         "init_kwargs": {
-            "trust_remote_code": True,
-            "model_kwargs": {"torch_dtype": "auto"},
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+        },
+    },
+    # Size-ablation sibling of diver-retriever-4b - identical init_kwargs so
+    # the size comparison stays preprocessing-clean. dtype is pinned to
+    # bfloat16 (2026-08-21): this repo's config declares no torch_dtype, so
+    # vLLM's "auto" silently ran it in fp16 while the 4B sibling (bf16
+    # config) ran bf16 - an inconsistent precision split within one
+    # size-ablation family. Explicit bf16 validated against the frozen
+    # legacy reference at Spearman 0.9989 (identical to the fp16 verdict).
+    "diver-retriever-0.6b": {
+        "model": "AQ-MedAI/Diver-Retriever-0.6B",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+            "dtype": "bfloat16",
         },
     },
 }
@@ -318,7 +471,7 @@ def _sync_back_if_needed(save_dir: str) -> None:
     if os.environ.get("NEEDS_REGION_SYNC") != "1":
         return
     host = os.environ.get("SABERMATH_CANONICAL_HOST", "hala")
-    path = os.environ.get("SABERMATH_CANONICAL_PATH", "/home/maria_drencheva/sabermath")
+    path = os.environ.get("SABERMATH_CANONICAL_PATH", "/home/ivo_petrov/sabermath")
     try:
         subprocess.run(
             ["rsync", "-auz", f"{save_dir}/", f"{host}:{path}/{save_dir}/"],
@@ -349,7 +502,11 @@ def _run_one(
     filepath.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = Path(save_dir) / ".checkpoints" / model_key / subset_key
 
-    if tensor_parallel_size > 1 and model_key not in GENERIC_MODELS_USE_TP:
+    if (
+        tensor_parallel_size > 1
+        and model_key not in GENERIC_MODELS_USE_TP
+        and model_key not in CUSTOM_MODELS_USE_TP
+    ):
         reason = (
             "is pinned to tensor_parallel_size=1 (confirmed to corrupt scores "
             "otherwise - see Rank1Processor._init())"
@@ -486,9 +643,9 @@ def main() -> None:
         nargs="+",
         choices=ALL_MODEL_KEYS,
         default=None,
-        help="Subset of models to run (default: all 7 - see the dependency "
-        "isolation warning in this script's module docstring before doing "
-        "that in a single shared environment).",
+        help="Subset of models to run (default: all of them - see the "
+        "dependency isolation warning in this script's module docstring "
+        "before doing that in a single shared environment).",
     )
     parser.add_argument(
         "--task",
