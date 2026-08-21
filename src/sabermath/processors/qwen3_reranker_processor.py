@@ -24,6 +24,17 @@ DEFAULT_TASK_INSTRUCTION = (
     "relevant to the query"
 )
 
+# The official yes/no judging chat template from the model card - module-level
+# so the vLLM-backed sibling (qwen3_reranker_vllm_processor.py) provably uses
+# the identical strings.
+PROMPT_PREFIX = (
+    "<|im_start|>system\nJudge whether the Document meets the "
+    "requirements based on the Query and the Instruct provided. Note "
+    'that the answer can only be "yes" or "no".<|im_end|>\n'
+    "<|im_start|>user\n"
+)
+PROMPT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
 
 class Qwen3RerankerProcessor(ModelProcessor):
     processor: ClassVar[str | None] = "qwen3-reranker"
@@ -90,15 +101,12 @@ class Qwen3RerankerProcessor(ModelProcessor):
         self._token_false_id = self._tokenizer.convert_tokens_to_ids("no")
         self._token_true_id = self._tokenizer.convert_tokens_to_ids("yes")
 
-        prefix = (
-            "<|im_start|>system\nJudge whether the Document meets the "
-            "requirements based on the Query and the Instruct provided. Note "
-            'that the answer can only be "yes" or "no".<|im_end|>\n'
-            "<|im_start|>user\n"
+        self._prefix_tokens = self._tokenizer.encode(
+            PROMPT_PREFIX, add_special_tokens=False
         )
-        suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-        self._prefix_tokens = self._tokenizer.encode(prefix, add_special_tokens=False)
-        self._suffix_tokens = self._tokenizer.encode(suffix, add_special_tokens=False)
+        self._suffix_tokens = self._tokenizer.encode(
+            PROMPT_SUFFIX, add_special_tokens=False
+        )
 
     def _format_instruction(self, query: str, doc: str) -> str:
         return (

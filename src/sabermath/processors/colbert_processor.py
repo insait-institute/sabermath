@@ -20,9 +20,29 @@ from .base import ModelProcessor
 class ColBERTProcessor(ModelProcessor):
     processor: ClassVar[str | None] = "pylate-colbert"
 
-    def __init__(self, model_name: str, *, encode_batch_size: int = 32) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        encode_batch_size: int = 32,
+        model_kwargs: dict | None = None,
+    ) -> None:
         self._model_name = model_name
         self._encode_batch_size = encode_batch_size
+        # torch_dtype bfloat16 by default (2026-08-21, precision-fairness
+        # rollout: no model computes in fp32 anymore). NOTE this one is a
+        # deliberate deviation from the checkpoints (both ModernColBERT
+        # configs declare fp32): validated on the frozen feasibility sample
+        # at Spearman 0.9993 (reason-moderncolbert) and 0.9907
+        # (gte-moderncolbert, NEAR-MATCH band - same acceptance category as
+        # reasonir/jina-v5-small), with ~10-35x faster scoring. Pass
+        # model_kwargs={"torch_dtype": "float32"} to reproduce the published
+        # fp32 numbers exactly.
+        self._model_kwargs = (
+            dict(model_kwargs)
+            if model_kwargs is not None
+            else {"torch_dtype": "bfloat16"}
+        )
         self._model = None
 
     @property
@@ -37,7 +57,10 @@ class ColBERTProcessor(ModelProcessor):
                 raise ImportError(
                     "Please install pylate to use ColBERTProcessor"
                 ) from e
-            self._model = models.ColBERT(model_name_or_path=self._model_name)
+            self._model = models.ColBERT(
+                model_name_or_path=self._model_name,
+                model_kwargs=self._model_kwargs,
+            )
         return self._model
 
     def get_scores(

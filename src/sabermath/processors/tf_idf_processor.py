@@ -24,6 +24,7 @@ class TfidfProcessor(ModelProcessor):
         documents: list[str],
         *,
         show_progress_bar: bool = True,
+        score_batch_size: int | None = None,
         **kwargs,
     ) -> list[float]:
         if not documents:
@@ -46,6 +47,18 @@ class TfidfProcessor(ModelProcessor):
         doc_vectors = vectorizer.fit_transform(documents)
         query_vector = vectorizer.transform([query])
 
-        scores = cosine_similarity(query_vector, doc_vectors)[0]
+        if score_batch_size is None:
+            return cosine_similarity(query_vector, doc_vectors)[0].tolist()
 
-        return scores.tolist()
+        # score_batch_size: similarity computed in fixed-size document slices
+        # while the vectorizer stays FIT ON THE FULL candidate set (the IDF
+        # statistics must never be chunked - that would change the scores).
+        # Exists purely for the timing harness's uniform 16-documents-per-step
+        # protocol; the underlying op is CPU-vectorized either way.
+        scores: list[float] = []
+        for start in range(0, doc_vectors.shape[0], score_batch_size):
+            block = cosine_similarity(
+                query_vector, doc_vectors[start : start + score_batch_size]
+            )[0]
+            scores.extend(float(s) for s in block)
+        return scores

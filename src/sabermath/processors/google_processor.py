@@ -111,12 +111,23 @@ class GoogleProcessor(EmbeddingProcessor):
         *,
         retries: int = 9,
         batch_size: int = 100,
-        max_concurrency: int = 20,
+        max_concurrency: int | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
+        # max_concurrency=None means "use the default (20)". The distinction
+        # matters for gemini-embedding-2: its per-request batch is capped at 1
+        # by the API, and the x1.2 boost below compensates the lost
+        # within-request parallelism - but only for the DEFAULT. An explicitly
+        # passed value (e.g. the timing harness's 16, standardizing documents
+        # in flight) must be honored exactly, never inflated.
+        explicit_concurrency = max_concurrency is not None
+        if max_concurrency is None:
+            max_concurrency = 20
+
         if self._model_name.startswith("gemini-embedding-2"):
             batch_size = 1
-            max_concurrency = math.ceil(max_concurrency * 1.2)
+            if not explicit_concurrency:
+                max_concurrency = math.ceil(max_concurrency * 1.2)
 
         sem = asyncio.Semaphore(max_concurrency)
         batches = list(self._split_to_batches(texts, batch_size))
@@ -142,7 +153,7 @@ class GoogleProcessor(EmbeddingProcessor):
         *,
         retries: int = 9,
         batch_size: int = 100,
-        max_concurrency: int = 20,
+        max_concurrency: int | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
         try:

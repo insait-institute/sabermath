@@ -30,21 +30,28 @@ class JaccardProcessor(ModelProcessor):
         documents: list[str],
         *,
         show_progress_bar: bool = True,
+        score_batch_size: int | None = None,
         **kwargs,
     ) -> list[float]:
         query_tokens = self._tokenize(query)
 
+        # score_batch_size only groups the (already sequential, per-document)
+        # loop into fixed-size slices - accepted for the timing harness's
+        # uniform 16-documents-per-step protocol, but it neither changes the
+        # scores nor creates any real parallelism here.
+        step = score_batch_size or len(documents) or 1
+
         scores: list[float] = []
+        for start in range(0, len(documents), step):
+            for document in documents[start : start + step]:
+                document_tokens = self._tokenize(document)
 
-        for document in documents:
-            document_tokens = self._tokenize(document)
+                union = query_tokens | document_tokens
+                if not union:
+                    scores.append(0.0)
+                    continue
 
-            union = query_tokens | document_tokens
-            if not union:
-                scores.append(0.0)
-                continue
-
-            intersection = query_tokens & document_tokens
-            scores.append(len(intersection) / len(union))
+                intersection = query_tokens & document_tokens
+                scores.append(len(intersection) / len(union))
 
         return scores

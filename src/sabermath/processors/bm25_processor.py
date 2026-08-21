@@ -46,6 +46,7 @@ class BM25Processor(ModelProcessor):
         documents: list[str],
         *,
         show_progress_bar: bool = True,
+        score_batch_size: int | None = None,
         **kwargs,
     ) -> list[float]:
         if not documents:
@@ -63,6 +64,17 @@ class BM25Processor(ModelProcessor):
             **kwargs,
         )
 
-        scores = bm25.get_scores(tokenized_query)
+        if score_batch_size is None:
+            return bm25.get_scores(tokenized_query).tolist()
 
-        return scores.tolist()
+        # score_batch_size: score in fixed-size document slices AGAINST THE
+        # FULL-CORPUS index (get_batch_scores uses the same corpus statistics
+        # as get_scores, so the numbers are identical) - exists purely so the
+        # timing harness can impose its uniform 16-documents-per-step
+        # protocol. Scoring here is CPU-vectorized either way; this caps, not
+        # creates, parallelism.
+        scores: list[float] = []
+        for start in range(0, len(documents), score_batch_size):
+            doc_ids = list(range(start, min(start + score_batch_size, len(documents))))
+            scores.extend(float(s) for s in bm25.get_batch_scores(tokenized_query, doc_ids))
+        return scores

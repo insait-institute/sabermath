@@ -222,8 +222,13 @@ class GroupRankProcessor(ModelProcessor):
         documents: list[str],
         *,
         show_progress_bar: bool = True,
+        batch_size: int | None = None,
         **kwargs,
     ) -> list[float]:
+        # batch_size slices the GENERATE CALLS over group-prompts (timing
+        # harness's 16-in-flight protocol). It deliberately does NOT touch
+        # group_size: docs-per-prompt is this model's official SCORING
+        # protocol (changing it changes scores), not a batching knob.
         if not documents:
             return []
 
@@ -246,9 +251,16 @@ class GroupRankProcessor(ModelProcessor):
                 prompts.append(self._group_prompt(query, [doc_texts[i] for i in group]))
                 group_doc_idxs.append(group)
 
-        outputs = self._llm.generate(
-            prompts, self._sampling_params, use_tqdm=show_progress_bar
-        )
+        step = batch_size or len(prompts)
+        outputs = []
+        for start in range(0, len(prompts), step):
+            outputs.extend(
+                self._llm.generate(
+                    prompts[start : start + step],
+                    self._sampling_params,
+                    use_tqdm=show_progress_bar,
+                )
+            )
 
         collected: dict[int, list[float]] = {i: [] for i in range(len(documents))}
         for out, group in zip(outputs, group_doc_idxs):

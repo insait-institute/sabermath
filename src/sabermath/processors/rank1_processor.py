@@ -154,6 +154,7 @@ class Rank1Processor(ModelProcessor):
         documents: list[str],
         *,
         show_progress_bar: bool = True,
+        batch_size: int | None = None,
         **kwargs,
     ) -> list[float]:
         if not documents:
@@ -166,9 +167,22 @@ class Rank1Processor(ModelProcessor):
             for doc in documents
         ]
 
-        # All candidates of this query are scored in a single batched call.
-        outputs = self._llm.generate(
-            prompts, self._sampling_params, use_tqdm=show_progress_bar
-        )
+        # Production default (batch_size=None): all candidates of this query
+        # are scored in a single batched call and vLLM schedules internally.
+        # batch_size slices that into fixed-size generate calls - used ONLY by
+        # the timing harness to standardize 16 documents in flight; note the
+        # semantics caveat there (variable thinking-chain lengths make each
+        # slice wait on its slowest member, so sliced timing reads worse than
+        # the production single call).
+        step = batch_size or len(prompts)
+        outputs = []
+        for start in range(0, len(prompts), step):
+            outputs.extend(
+                self._llm.generate(
+                    prompts[start : start + step],
+                    self._sampling_params,
+                    use_tqdm=show_progress_bar,
+                )
+            )
 
         return [self._relevance_score(out.outputs[0]) for out in outputs]

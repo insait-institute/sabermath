@@ -40,3 +40,11 @@ from .reasonir_processor import ReasonIRProcessor
 from .splade_processor import SpladeProcessor
 from .grouprank_processor import GroupRankProcessor
 from .rader_reranker_processor import RaDeRRerankerProcessor
+
+# vLLM-backed production defaults (since 2026-08-20) for the two cross-encoder
+# reranker families above; the HF-transformers versions stay as the legacy
+# reference paths (scripts/test_vllm_feasibility.py compares the two). Heavy
+# deps (vllm, peft) are imported lazily inside _init, so these imports are as
+# cheap as the rest.
+from .qwen3_reranker_vllm_processor import Qwen3RerankerVLLMProcessor
+from .rader_reranker_vllm_processor import RaDeRRerankerVLLMProcessor
