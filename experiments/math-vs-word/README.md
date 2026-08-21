@@ -47,7 +47,7 @@ It processes every target and every relevant candidate, then writes the extracte
 python calc_sims.py --method <METHOD> --config_file config.yaml
 ```
 
-The <METHOD> argument can be either a model id written exactly as in the list below, or one of 'jaccard','tf-idf' or 'approach0'. These are three non-embedding retrieval methods we also evaluate in our main experiment.
+The <METHOD> argument can be either a model id written exactly as in the list below, or one of 'jaccard', 'tf-idf', 'bm25' or 'approach0'. These are four non-embedding retrieval methods we also evaluate in our main experiment.
 
 In the case of an embedding model method, each target, this script computes embeddings for:
 
@@ -57,7 +57,7 @@ In the case of an embedding model method, each target, this script computes embe
 
 It then compares each target representation against the embeddings of the target’s top 5 candidates, where each candidate is represented using its problem plus solution.
 
-Similarly, for the non-embedding model methods (Jaccard similarity, TF-IDF and Approach0) the relevance of the target problem is computed to the 5 most relevant candidates. For TF-IDF all 150 candidates are used as the corpus. Tokenization in all 3 cases is done through Approach Zero's specialized mathematics tokenizer.
+Similarly, for the non-embedding model methods (Jaccard similarity, TF-IDF, BM-25 and Approach0) the relevance of the target problem is computed to the 5 most relevant candidates. For TF-IDF all 150 candidates are used as the corpus. Tokenization in all 4 cases is done through Approach Zero's specialized mathematics tokenizer (equation blocks are tokenized via `pya0.tokenize`; the surrounding prose is tokenized separately as plain words, with no stop-word filtering).
 
 The script averages the 5 similarity scores and saves the results as a JSON file in:
 

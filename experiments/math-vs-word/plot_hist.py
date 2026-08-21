@@ -35,6 +35,7 @@ MODEL_IDS = [
     # "microsoft/harrier-oss-v1-270m",
     "tf-idf",
     # "jaccard",
+    # "bm25",
     "google-bert/bert-base-uncased",
     # "FacebookAI/roberta-base",
     # "microsoft/codebert-base",
@@ -63,6 +64,7 @@ ALL_MODEL_IDS = [
     "microsoft/harrier-oss-v1-270m",
     "tf-idf",
     "jaccard",
+    "bm25",
     "google-bert/bert-base-uncased",
     "FacebookAI/roberta-base",
     "microsoft/codebert-base",
@@ -93,6 +95,7 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     "microsoft/harrier-oss-v1-270m": "Harrier 270M",
     "tf-idf": "TF-IDF",
     "jaccard": "Jaccard",
+    "bm25": "BM-25",
     "google-bert/bert-base-uncased": "BERT",
     "FacebookAI/roberta-base": "RoBERTa",
     "microsoft/codebert-base": "CodeBERT",
@@ -139,6 +142,7 @@ DEFAULT_MODEL_MARKER_SYMBOLS = {
     # Lexical/string baselines
     "tf-idf": "*",
     "jaccard": "*",
+    "bm25": "*",
 }
 
 # ---------------------------------------------------------------------
@@ -180,6 +184,7 @@ DEFAULT_MODEL_COLORS = {
     # Lexical/string baselines: distinguishable neutral colors
     "tf-idf": "#5f6368",
     "jaccard": "#9e9e9e",
+    "bm25": "#757575",
     # Reference statistic: dashed line color
     MATH_TOKEN_RATIO_MODEL_ID: "#263238",
 }
