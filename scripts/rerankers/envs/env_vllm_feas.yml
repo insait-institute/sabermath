@@ -1,0 +1,20 @@
+# For: scripts/test_vllm_feasibility.py --backend vllm ONLY. Identical to
+# env_vllm.yml (same pins - see the warning there about why vllm and
+# flashinfer-python must stay pinned) plus peft, which the feasibility
+# harness needs once, for rader-reranker-7b's offline LoRA merge (its
+# trained SEQ_CLS `score` head ships via modules_to_save, which vLLM's LoRA
+# runtime can't serve - so the adapter has to be merged into the base model
+# before vLLM can load it). Deliberately a separate file rather than adding
+# peft to env_vllm.yml: that env backs the production rank1/qwen3-embedding
+# jobs and its package list is verified as-is - don't grow it for a test
+# harness's convenience.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install numpy datasets transformers "vllm==0.26.0" "flashinfer-python==0.6.14" peft
+  pip install -e "$SABERMATH_REPO"

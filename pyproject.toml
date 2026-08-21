@@ -18,8 +18,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# PINNED, mirroring scripts/rerankers/envs/env_vllm.yml (see the warning
+# there): every vLLM recipe in this repo - pooler_config kwarg name, the
+# Qwen3-Reranker SeqCls conversion, the LlamaBidirectionalModel remap - was
+# validated on exactly 0.26.0, and kwarg spellings differ on other versions.
+# scripts/run_models.sh's venv installs this extra, so the models.txt
+# "--driver vllm" table runs are covered by the pin too. Bump deliberately
+# and re-verify with scripts/test_vllm_feasibility.py, never by omission.
 vllm = [
-    "vllm>=0.11.0"
+    "vllm==0.26.0",
+    "flashinfer-python==0.6.14"
 ]
 
 apis = [

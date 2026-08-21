@@ -20,6 +20,18 @@ dependencies:
   - python=3.11
   - cuda-toolkit=12.9
   - parallel
+# sentence-transformers is PINNED (was ">=5.4.1") - confirmed the hard way
+# on 2026-08-19: a fresh env build pulled 6.0.0, whose explicit
+# modules.Transformer path silently wraps every input in the tokenizer's
+# CHAT TEMPLATE (a 13-token text became 39 tokens of
+# <|im_start|>system...<|im_end|> markup), so "lasttoken" pooling embeds the
+# trailing template newline instead of the last content token. That
+# corrupts every model built via _build_rader_biencoder_processor
+# (rader-3b/7b/14b) and would have silently invalidated any rerun. 5.7.0 is
+# the version this pipeline's behavior was studied/verified against (see
+# measure_query_time.py's module-internals comments). Bump deliberately and
+# re-verify (scripts/test_vllm_feasibility.py's reference-vs-vllm agreement
+# is a ready-made check), never by omission.
 postinstall: |
-  pip install "transformers>=4.51.0" "sentence-transformers>=5.4.1" torch datasets numpy peft
+  pip install "transformers>=4.51.0" "sentence-transformers==5.7.0" torch datasets numpy peft
   pip install -e "$SABERMATH_REPO"
