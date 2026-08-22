@@ -66,7 +66,7 @@ fi
 
 source scripts/rerankers/_common.sh
 
-mkenv -n reranker-qwen3-rerank -f scripts/rerankers/envs/env_qwen3_reranker.yml -- \
+mkenv -n reranker-vllm-qwen3-rerank-4b -f scripts/rerankers/envs/env_vllm_feas.yml -- \
   python scripts/run_rerankers.py --models qwen3-reranker-4b "$@"
 
 echo "Done."

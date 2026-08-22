@@ -1,10 +1,10 @@
 """Evaluate the SABER-Math rerankers that need custom scoring logic (rank1
 0.5B/7B/32B, Qwen3-Reranker 0.6B/4B/8B, GTE-ModernColBERT,
 Reason-ModernColBERT, ReasonIR, SPLADE-code 0.6B/8B, RaDeR bi-encoders
-3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B), plus the models that run
-through the generic HuggingFace path (Qwen3-Embedding-8B,
-Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B), across all three tasks
-(statement-statement, statement-full, full-full).
+3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B, INF-Retriever-v1-Pro),
+plus the models that run through the generic HuggingFace path
+(Qwen3-Embedding-8B, Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B),
+across all three tasks (statement-statement, statement-full, full-full).
 
 Each model/task run is checkpointed after every query to
 "<save-to>/.checkpoints/<model>/<subset>/<task>.json" (see
@@ -26,11 +26,16 @@ most models here run from ONE environment, scripts/rerankers/envs/
 env_vllm_feas.yml (vllm==0.26.0 pinned + peft for rader-reranker-7b's
 one-off LoRA merge): rank1, diver-grouprank, every qwen3-reranker,
 reasonir-8b, the rader bi-encoders + reranker, and all four GENERIC_MODELS.
-Only two families still need their own envs - GTE/Reason-ModernColBERT
-(pylate pins sentence-transformers==5.3.0, env_colbert.yml) and SPLADE
-(SparseEncoder, env_splade.yml). env_st_biencoders.yml remains only for the
-LEGACY reference paths (scripts/test_vllm_feasibility.py). Still run this
-script once per model (or per same-env family), each in its own process:
+Only three exceptions still need their own envs - GTE/Reason-ModernColBERT
+(pylate pins sentence-transformers==5.3.0, env_colbert.yml), SPLADE
+(SparseEncoder, env_splade.yml), and inf-retriever-v1-pro
+(SentenceTransformers production path, env_inf_retriever.yml - its
+bidirectional remote-code attention has no VALIDATED vLLM recipe yet, see
+_build_inf_retriever_processor, and that remote code needs
+transformers==4.51.0 exactly, see the env's header).
+env_st_biencoders.yml remains only for the LEGACY reference paths
+(scripts/test_vllm_feasibility.py). Still run this script once per model
+(or per same-env family), each in its own process:
 
     python scripts/run_rerankers.py --models rank1-32b
     python scripts/run_rerankers.py --models reasonir-8b
@@ -216,6 +221,60 @@ def _build_rader_biencoder_vllm(model_name: str):
     )
 
 
+def _build_inf_retriever_processor(model_name: str = "infly/inf-retriever-v1-pro"):
+    """INF-Retriever-v1-Pro (7B, gte-Qwen2 lineage): auto-config
+    SentenceTransformers load. The repo ships the full ST stack
+    (modules.json: Transformer + lasttoken Pooling + Normalize) so unlike
+    the RaDeR bi-encoders no hand-built module stack is needed - this IS
+    the author-blessed path.
+
+    Deliberate exception to the 2026-08-20 vLLM-default policy: the repo's
+    bundled modeling_qwen.py runs BIDIRECTIONAL attention when used as an
+    embedder (Qwen2Model.forward's is_causal defaults to False - checked in
+    the repo source; same design as Alibaba's gte-Qwen2-7B-instruct this
+    lineage descends from), while vLLM's stock Qwen2Model is causal. A
+    candidate vLLM recipe (hf_overrides is_causal=False + LAST pooling) is
+    registered in scripts/test_vllm_feasibility.py - switch this builder
+    only after a FEASIBLE verdict there; running it causal-by-default would
+    be exactly the silent wrong-attention/wrong-pooling class of bug that
+    burned the RaDeR family.
+
+    Load-bearing details:
+    - trust_remote_code=True matters twice over: the bidirectional modeling
+      AND the repo's tokenization_qwen.py, whose add_eos_token=true appends
+      <|endoftext|> so "lasttoken" pooling lands on a constant summary
+      position (a vanilla Qwen2Tokenizer silently ignores add_eos_token).
+    - model_kwargs torch_dtype="auto" -> fp16, the checkpoint's declared
+      dtype; ST's default load would silently compute in fp32, against the
+      2026-08-21 precision-fairness policy (no model computes in fp32).
+    - the tokenizer ships a chat template, so the sentence-transformers
+      >=5.7 "message"-modality latch that chat-template-wrapped every RaDeR
+      input (see _build_rader_biencoder_processor's history) applies here
+      too; strip it post-init - a no-op if ST didn't infer it.
+    - prompt-less on purpose: the repo defines a "query" instruction prompt
+      (config_sentence_transformers.json) but default_prompt_name is null,
+      and the benchmark protocol runs every model without instruction
+      prefixes (instruction prompting is the team's separate experiment).
+    - no chunking: max_seq_length is 32768 (sentence_bert_config.json) and
+      essentially no benchmark document comes near it (only 0.32% exceed
+      even 2048 tokens), so ST's silent truncation at 32768 is a no-op in
+      practice.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    st = SentenceTransformer(
+        model_name,
+        trust_remote_code=True,
+        model_kwargs={"torch_dtype": "auto"},
+    )
+    transformer = st[0]
+    if "message" in getattr(transformer, "modality_config", {}):
+        transformer.modality_config = {
+            k: v for k, v in transformer.modality_config.items() if k != "message"
+        }
+    return STProcessor(st, model_name)
+
+
 CUSTOM_MODEL_BUILDERS = {
     "rank1-32b": lambda tp: Rank1Processor(tensor_parallel_size=1),
     # rank1 size ablations - same processor/prompt/scoring as rank1-32b,
@@ -276,6 +335,11 @@ CUSTOM_MODEL_BUILDERS = {
     "diver-grouprank-32b": lambda tp: GroupRankProcessor(
         tensor_parallel_size=max(1, tp)
     ),
+    # INF-Retriever-v1-Pro: SentenceTransformers-backed ON PURPOSE (the one
+    # bi-encoder exception to the 2026-08-20 vLLM-default rollout) -
+    # bidirectional remote-code attention with no VALIDATED vLLM path yet.
+    # See _build_inf_retriever_processor.
+    "inf-retriever-v1-pro": lambda tp: _build_inf_retriever_processor(),
 }
 
 # Custom models where --tensor-parallel-size is actually honored (everything

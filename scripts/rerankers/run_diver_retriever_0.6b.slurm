@@ -73,7 +73,7 @@ source scripts/rerankers/_common.sh
 # expandable_segments reduces that fragmentation.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-mkenv -n reranker-st-diver -f scripts/rerankers/envs/env_st_biencoders.yml -- \
+mkenv -n reranker-vllm-diver-06b -f scripts/rerankers/envs/env_vllm_feas.yml -- \
   python scripts/run_rerankers.py --models diver-retriever-0.6b "$@"
 
 echo "Done."

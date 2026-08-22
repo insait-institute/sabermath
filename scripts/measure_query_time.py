@@ -312,6 +312,14 @@ EMBEDDING_BUILDERS = {
     "rader-3b": _production_custom("rader-3b"),
     "rader-7b": _production_custom("rader-7b"),
     "rader-14b": _production_custom("rader-14b"),
+    # SentenceTransformers-backed in production ON PURPOSE (bidirectional
+    # remote-code attention, no validated vLLM path yet - see
+    # _build_inf_retriever_processor in run_rerankers.py). The "embedding"
+    # category's batch_size=16 default applies cleanly: STProcessor.encode
+    # forwards it to sentence-transformers' own batching. NOTE bf16-style
+    # first-query kernel-compile inflation doesn't apply (fp16), but ST-path
+    # first-query CUDA warmup still does - read medians, not just means.
+    "inf-retriever-v1-pro": _production_custom("inf-retriever-v1-pro"),
     "qwen3-embedding-8b": _production_generic("qwen3-embedding-8b"),
     # models.txt "--driver vllm" table models (plain loads).
     "qwen3-embedding-4b": _vllm("Qwen/Qwen3-Embedding-4B"),

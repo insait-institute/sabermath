@@ -75,7 +75,7 @@ source scripts/rerankers/_common.sh
 # expandable_segments reduces that fragmentation.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-mkenv -n reranker-st-rader -f scripts/rerankers/envs/env_st_biencoders.yml -- \
+mkenv -n reranker-vllm-rader-reranker -f scripts/rerankers/envs/env_vllm_feas.yml -- \
   python scripts/run_rerankers.py --models rader-reranker-7b "$@"
 
 echo "Done."

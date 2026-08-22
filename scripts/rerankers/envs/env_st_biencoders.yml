@@ -1,10 +1,16 @@
-# For: reason-embed-qwen3-8b, diver-retriever-4b, rader-14b.
+# For: the frozen LEGACY reference recipes in
+# scripts/test_vllm_feasibility.py for the bi-encoders that moved to vLLM
+# on 2026-08-20 (reason-embed-qwen3-8b, diver-retriever-4b/0.6b,
+# rader-3b/7b/14b, ...), plus jina-v5-nano's timing job.
+# NOT for inf-retriever-v1-pro (the one production ST bi-encoder): its
+# remote modeling code crashes on the transformers 5.x this env's
+# ">=4.51.0" floor now installs, so it has its own exact-pinned
+# env_inf_retriever.yml - see that file's header.
 #
-# All three are plain bi-encoder embedding models (confirmed against each
-# model's own card/paper - none is a cross-encoder), so they run through
-# sabermath's generic SentenceTransformersProcessor path (see GENERIC_MODELS
-# in run_rerankers.py) - no custom Processor needed, unlike rank1/Qwen3-
-# Reranker/ColBERT/ReasonIR/SPLADE.
+# All of these are plain bi-encoder embedding models (confirmed against each
+# model's own card/paper - none is a cross-encoder), running through
+# sabermath's SentenceTransformersProcessor - no custom scoring Processor
+# needed, unlike rank1/Qwen3-Reranker/ColBERT/ReasonIR/SPLADE.
 #
 # transformers is floored (not exact-pinned) to the same >=4.51.0 already
 # used for qwen3-reranker-8b's env, since these are all Qwen3/Qwen2.5-based

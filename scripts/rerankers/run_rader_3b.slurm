@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=reranker_rader_3b
 #SBATCH --nodes=1
-#SBATCH --partition=batch
+#SBATCH --partition=non-reserved
 #SBATCH --constraint=type-gpu
 #SBATCH --gpus=h200:1
 #SBATCH --mem=120G
@@ -69,12 +69,30 @@ fi
 
 source scripts/rerankers/_common.sh
 
+# One-time poisoned-state purge for the 2026-08-20 rader-3b rerun: every
+# rader-3b result/checkpoint written BEFORE the sentence-transformers
+# chat-template bug was found (see run_rerankers.py's legacy
+# _build_rader_biencoder_processor) is invalid. The canonical copy gets
+# cleaned once by scripts/rerankers/rerun_rader.sh, but nodes keep stale
+# LOCAL copies the pull above can never remove (rsync -u updates, never
+# deletes) - and a rerun here would silently RESUME from them. Guarded by
+# mtime so it is idempotent across resubmissions: if ANY local rader-3b
+# file is newer than the cutoff, it is this rerun's own fresh progress and
+# everything is kept.
+RADER_PURGE_CUTOFF="2026-08-20 12:00"
+if ! { find results/rerankers/.checkpoints/rader-3b -type f -newermt "$RADER_PURGE_CUTOFF" 2>/dev/null; \
+       find results/rerankers -maxdepth 1 -name 'rader-3b*.json' -newermt "$RADER_PURGE_CUTOFF" 2>/dev/null; } | grep -q .; then
+  echo "[~] Purging pre-fix rader-3b results/checkpoints on this node (nothing newer than $RADER_PURGE_CUTOFF)."
+  rm -rf "results/rerankers/.checkpoints/rader-3b"
+  rm -f results/rerankers/rader-3b*.json
+fi
+
 # See run_rader_14b.slurm for why: fp32-by-default plus allocator
 # fragmentation OOM'd the 14B sibling model partway through a run.
 # expandable_segments reduces that fragmentation.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-mkenv -n reranker-st-rader -f scripts/rerankers/envs/env_st_biencoders.yml -- \
+mkenv -n reranker-vllm-rader-3b -f scripts/rerankers/envs/env_vllm_feas.yml -- \
   python scripts/run_rerankers.py --models rader-3b "$@"
 
 echo "Done."
