@@ -155,3 +155,16 @@ Most experiment scripts assume that the required datasets, vector caches, or int
 This project is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0).
 
 You are free to share and adapt the material, provided that appropriate credit is given and any derivative works are distributed under the same license.
+
+## Citation 
+
+```bibtex
+@inproceedings{
+  georgiev2026sabermath,
+  title={{SABER}-Math: An Automated Reranking Benchmark for Mathematical Information Retrieval},
+  author={Anonymous},
+  booktitle={The 2026 Conference on Empirical Methods in Natural Language Processing},
+  year={2026},
+  url={https://openreview.net/forum?id=Tb2EKLtAS0}
+}
+```
