@@ -8,6 +8,9 @@ dependencies:
   - pandas
   - numpy
   - matplotlib
+  # plot_hist.py imports this - was missing entirely from this file (the
+  # user must have been running it from a separate, undocumented env).
+  - seaborn
 
   - pip:
       - datasets
@@ -19,6 +22,31 @@ dependencies:
       - tqdm
       - requests
       - transformers
-      - vllm
-      - sentence-transformers
+      # PINNED - was unpinned, which resolved to vllm==0.27.1 and crashed
+      # Qwen3-Embedding-8B's engine core with "TypeError: type 'array.array'
+      # is not subscriptable" (confirmed on job 736492: an internal vLLM
+      # function's `array.array[int]` return-type annotation isn't valid on
+      # this env's python=3.11). Every other env file in this repo pins
+      # vllm==0.26.0 exactly for this reason (see env_vllm.yml's own
+      # warning) - matching that pin here instead of trusting "latest".
+      - vllm==0.26.0
+      - flashinfer-python==0.6.14
+      # PINNED - was unpinned, which resolved to sentence-transformers 6.0.0.
+      # scripts/rerankers/envs/env_st_biencoders.yml documents (2026-08-19)
+      # that 6.0.0's modules.Transformer silently wraps every input in the
+      # tokenizer's chat template, so "lasttoken" pooling embeds the
+      # trailing template token instead of the last content token - exactly
+      # the pooling mode load_models.py's _build_octen_processor() relies
+      # on. 5.7.0 is the version that fix was verified against; matching it
+      # here rather than risking the same silent corruption.
+      - sentence-transformers==5.7.0
       - rank_bm25
+      # jina-embeddings-v5-text-nano's remote-code modeling file imports
+      # peft (confirmed on job 736486: ImportError naming it explicitly).
+      - peft
+      # jaccard/tf-idf/bm25/approach0 all tokenize via sim_helpers.py, which
+      # imports pya0 unconditionally - pinned to match pyproject.toml's
+      # "legacy" extra (scripts/timing/envs/env_classical.yml uses the same
+      # pin). scikit-learn is tf-idf's own vectorizer/cosine-similarity dep.
+      - pya0==0.3.7; platform_system == "Linux"
+      - scikit-learn

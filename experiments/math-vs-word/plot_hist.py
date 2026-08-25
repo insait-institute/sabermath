@@ -68,6 +68,36 @@ ALL_MODEL_IDS = [
     "google-bert/bert-base-uncased",
     "FacebookAI/roberta-base",
     "microsoft/codebert-base",
+    # --- Added 2026-08-23: the rest of the paper's model table, run via
+    # load_models.ADDITIONAL_MODELS. Every id below must match that
+    # registry's own strings EXACTLY (model_to_file_stem() just does
+    # .replace("/", "_") - no other normalization). ---
+    # EMBED
+    "hanhainebula/reason-embed-qwen3-8b-0928",
+    "AQ-MedAI/Diver-Retriever-4B",
+    "AQ-MedAI/Diver-Retriever-0.6B",
+    "infly/inf-retriever-v1-pro",
+    "reasonir/ReasonIR-8B",
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes",
+    "nvidia/llama-embed-nemotron-8b",
+    "intfloat/multilingual-e5-large",
+    "jinaai/jina-embeddings-v5-text-small",
+    # API (OpenRouter)
+    "text-embedding-3-large",
+    "text-embedding-3-small",
+    # RERANK
+    "jhu-clsp/rank1-32b",
+    "qwen3-reranker-8b",
+    "qwen3-reranker-4b",
+    "qwen3-reranker-0.6b",
+    "splade-code-8b",
+    "splade-code-0.6b",
+    "rader-reranker-7b",
+    "diver-grouprank-32b",
+    "lightonai/GTE-ModernColBERT-v1",
+    "lightonai/Reason-ModernColBERT",
 ]
 
 MATH_TOKEN_RATIO_MODEL_ID = "target_math_token_ratio"
@@ -99,6 +129,30 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     "google-bert/bert-base-uncased": "BERT",
     "FacebookAI/roberta-base": "RoBERTa",
     "microsoft/codebert-base": "CodeBERT",
+    # --- Added 2026-08-23 ---
+    "hanhainebula/reason-embed-qwen3-8b-0928": "Reason-Embed Qwen3 8B",
+    "AQ-MedAI/Diver-Retriever-4B": "Diver-Retriever 4B",
+    "AQ-MedAI/Diver-Retriever-0.6B": "Diver-Retriever 0.6B",
+    "infly/inf-retriever-v1-pro": "INF-Retriever v1 Pro",
+    "reasonir/ReasonIR-8B": "ReasonIR 8B",
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "RaDeR 14B",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "RaDeR 7B",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "RaDeR 3B",
+    "nvidia/llama-embed-nemotron-8b": "LLaMA-Embed Nemotron 8B",
+    "intfloat/multilingual-e5-large": "Multilingual E5 Large",
+    "jinaai/jina-embeddings-v5-text-small": "Jina Small",
+    "text-embedding-3-large": "Text-Embedding-3 Large",
+    "text-embedding-3-small": "Text-Embedding-3 Small",
+    "jhu-clsp/rank1-32b": "Rank1 32B",
+    "qwen3-reranker-8b": "Qwen3-Reranker 8B",
+    "qwen3-reranker-4b": "Qwen3-Reranker 4B",
+    "qwen3-reranker-0.6b": "Qwen3-Reranker 0.6B",
+    "splade-code-8b": "SPLADE-Code 8B",
+    "splade-code-0.6b": "SPLADE-Code 0.6B",
+    "rader-reranker-7b": "RaDeR-Reranker 7B",
+    "diver-grouprank-32b": "Diver-GroupRank 32B",
+    "lightonai/GTE-ModernColBERT-v1": "GTE-ModernColBERT",
+    "lightonai/Reason-ModernColBERT": "Reason-ModernColBERT",
     MATH_TOKEN_RATIO_MODEL_ID: "Math-token ratio",
 }
 
@@ -143,6 +197,46 @@ DEFAULT_MODEL_MARKER_SYMBOLS = {
     "tf-idf": "*",
     "jaccard": "*",
     "bm25": "*",
+    # --- Added 2026-08-23 ---
+    # RaDeR family (Raderspace bi-encoders + its LoRA reranker)
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "d",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "d",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "d",
+    "rader-reranker-7b": "d",
+    # Diver family (AQ-MedAI retrievers + the groupwise reranker)
+    "AQ-MedAI/Diver-Retriever-4B": "<",
+    "AQ-MedAI/Diver-Retriever-0.6B": "<",
+    "diver-grouprank-32b": "<",
+    # Qwen-architecture derivatives - share Qwen's diamond marker
+    "hanhainebula/reason-embed-qwen3-8b-0928": "D",
+    "qwen3-reranker-8b": "D",
+    "qwen3-reranker-4b": "D",
+    "qwen3-reranker-0.6b": "D",
+    # SPLADE (naver)
+    "splade-code-8b": "P",
+    "splade-code-0.6b": "P",
+    # ColBERT (lightonai)
+    "lightonai/GTE-ModernColBERT-v1": "h",
+    "lightonai/Reason-ModernColBERT": "h",
+    # Standalone entities. matplotlib's filled-shape alphabet
+    # (o v ^ < > 8 s p * h H D d P X) is exhausted by the families above -
+    # these reuse a shape from an unrelated family, relying on color alone
+    # to distinguish (same convention this file already uses within a
+    # family). Do NOT use '1'/'2'/'3'/'4'/'+'/'x'/'|'/'_' - those are
+    # unfilled line-only markers in matplotlib, and every scatter call
+    # here sets edgecolors="none", linewidths=0 (deliberate, for the
+    # filled shapes) - on a line-only marker that draws NOTHING (confirmed
+    # visually: they rendered as blank/invisible in
+    # plots/maths_vs_words_all_models.pdf).
+    "jhu-clsp/rank1-32b": ">",
+    "infly/inf-retriever-v1-pro": "8",  # shares BAAI/bge-m3's octagon
+    "nvidia/llama-embed-nemotron-8b": "v",  # shares RoBERTa's triangle_down
+    "intfloat/multilingual-e5-large": "^",  # shares the Google family's triangle_up
+    "reasonir/ReasonIR-8B": "o",  # shares approach0's circle
+    "jinaai/jina-embeddings-v5-text-small": "p",
+    # OpenAI (via OpenRouter) - shares Octen's square
+    "text-embedding-3-large": "s",
+    "text-embedding-3-small": "s",
 }
 
 # ---------------------------------------------------------------------
@@ -185,6 +279,38 @@ DEFAULT_MODEL_COLORS = {
     "tf-idf": "#5f6368",
     "jaccard": "#9e9e9e",
     "bm25": "#757575",
+    # --- Added 2026-08-23 ---
+    # RaDeR family: deep red/maroon, darkest = largest model
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "#b71c1c",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "#e53935",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "#ff8a80",
+    "rader-reranker-7b": "#880e4f",
+    # Diver family: blue
+    "AQ-MedAI/Diver-Retriever-4B": "#1565c0",
+    "AQ-MedAI/Diver-Retriever-0.6B": "#42a5f5",
+    "diver-grouprank-32b": "#0d47a1",
+    # Qwen-architecture derivatives: purple/magenta family (shares the hue
+    # with Qwen3-Embedding, distinguished by shade)
+    "hanhainebula/reason-embed-qwen3-8b-0928": "#d500f9",
+    "qwen3-reranker-8b": "#4a0080",
+    "qwen3-reranker-4b": "#7b1fa2",
+    "qwen3-reranker-0.6b": "#ce93d8",
+    # SPLADE: teal
+    "splade-code-8b": "#00838f",
+    "splade-code-0.6b": "#26c6da",
+    # ColBERT: brown/amber
+    "lightonai/GTE-ModernColBERT-v1": "#6d4c41",
+    "lightonai/Reason-ModernColBERT": "#a1887f",
+    # Standalone entities
+    "jhu-clsp/rank1-32b": "#c62828",
+    "infly/inf-retriever-v1-pro": "#00695c",
+    "nvidia/llama-embed-nemotron-8b": "#558b2f",
+    "intfloat/multilingual-e5-large": "#546e7a",
+    "reasonir/ReasonIR-8B": "#f57f17",
+    "jinaai/jina-embeddings-v5-text-small": "#f48fb1",
+    # OpenAI (via OpenRouter): indigo
+    "text-embedding-3-large": "#1a237e",
+    "text-embedding-3-small": "#3949ab",
     # Reference statistic: dashed line color
     MATH_TOKEN_RATIO_MODEL_ID: "#263238",
 }
@@ -350,6 +476,24 @@ def target_math_token_ratio(target: Mapping[str, Any]) -> float:
     return float(len(target_math_tokens) / total_tokens)
 
 
+# Models whose scoring is coarse/discrete enough that an exact
+# math_score == text_score tie is expected, not a sign of a bug - skipped
+# rather than raised. jaccard was the original case (small-integer set-ratio
+# scores). Two more confirmed by direct inspection of similarities/*.json
+# after the 2026-08-23 model sweep:
+#   - diver-grouprank-32b: GroupRankProcessor's discrete rank-fraction
+#     scoring (group_size=20) - 23/969 targets tied.
+#   - infly/inf-retriever-v1-pro: loads in fp16 (see load_models.py's
+#     _build_inf_retriever_processor) with an already narrow, anisotropic
+#     similarity band - fp16's quantization step near 1.0 collapses
+#     genuinely-different scores onto the same representable float -
+#     9/969 targets tied.
+# Any OTHER model hitting this is still treated as a real bug (raised
+# below) - an unexpected tie in a continuous-score model is worth
+# investigating, not silently skipping.
+MODELS_WITH_EXPECTED_TIES = {"jaccard", "diver-grouprank-32b", "infly/inf-retriever-v1-pro"}
+
+
 def aggregate_maths_greater_than_words_by_domain(
     content: Mapping[str, Mapping[str, Any]],
     *,
@@ -359,7 +503,7 @@ def aggregate_maths_greater_than_words_by_domain(
     m_greater_w_counts = {group: 0 for group in GROUP_NAMES}
     totals = {group: 0 for group in GROUP_NAMES}
 
-    skipped_jaccard_ties = 0
+    skipped_ties = 0
 
     for target_id, row in content.items():
         target_id = str(target_id)
@@ -393,8 +537,8 @@ def aggregate_maths_greater_than_words_by_domain(
             )
 
         if text_score == math_score:
-            if model_id == "jaccard":
-                skipped_jaccard_ties += 1
+            if model_id in MODELS_WITH_EXPECTED_TIES:
+                skipped_ties += 1
                 continue
 
             raise ValueError(
@@ -411,8 +555,8 @@ def aggregate_maths_greater_than_words_by_domain(
             m_greater_w_counts["All"] += 1
             m_greater_w_counts[domain] += 1
 
-    if skipped_jaccard_ties:
-        print(f"Skipped {skipped_jaccard_ties} tied text/math examples for jaccard.")
+    if skipped_ties:
+        print(f"Skipped {skipped_ties} tied text/math examples for {model_id!r}.")
 
     percentages = {
         group: (
@@ -520,6 +664,7 @@ def plot_maths_greater_than_words_points(
     y_max: float = 102.0,
     legend_fontsize: float = 17.0,
     legend_ncol: int = 1,
+    legend_outside: bool = False,
     output_path: str = "plots/maths_greater_than_words_all_models_with_math_token_ratio.pdf",
 ):
     sns.set_theme(style="white")
@@ -652,20 +797,41 @@ def plot_maths_greater_than_words_points(
 
     sns.despine(ax=ax, left=True, bottom=True)
 
-    legend = ax.legend(
-        loc="lower left",
-        bbox_to_anchor=(0.015, 0.015),
-        bbox_transform=ax.transAxes,
-        frameon=True,
-        fancybox=True,
-        framealpha=0.9,
-        fontsize=legend_fontsize,
-        ncol=legend_ncol,
-        borderaxespad=0.0,
-    )
+    if legend_outside:
+        # The in-plot "lower left" legend (below) works for a handful of
+        # models, but with all ~40+ it needs so many rows that it swallows
+        # entire domain columns (confirmed visually: it covered all of
+        # Algebra and part of Calculus in
+        # plots/maths_vs_words_all_models.pdf). Below the axes, spread
+        # wide and shallow instead - keeps every data point visible and
+        # scales to any model count by just adding columns.
+        legend = ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            bbox_transform=ax.transAxes,
+            frameon=True,
+            fancybox=True,
+            framealpha=0.9,
+            fontsize=legend_fontsize,
+            ncol=legend_ncol,
+            borderaxespad=0.0,
+        )
+    else:
+        legend = ax.legend(
+            loc="lower left",
+            bbox_to_anchor=(0.015, 0.015),
+            bbox_transform=ax.transAxes,
+            frameon=True,
+            fancybox=True,
+            framealpha=0.9,
+            fontsize=legend_fontsize,
+            ncol=legend_ncol,
+            borderaxespad=0.0,
+        )
     legend.set_zorder(10)
 
-    plt.tight_layout()
+    if not legend_outside:
+        plt.tight_layout()
 
     Path("plots").mkdir(parents=True, exist_ok=True)
 
@@ -755,8 +921,13 @@ fig, ax = plot_maths_greater_than_words_points(
     marker_symbols=marker_symbols,
     model_colors=model_colors,
     y_min=0.0,
-    legend_fontsize=15 if args.all else 20,
-    legend_ncol=2 if args.all else 1,
+    legend_fontsize=12 if args.all else 20,
+    # --all: wide+shallow (many columns) below the axes, via
+    # legend_outside - a tall narrow in-plot legend at this model count
+    # would cover real data columns. Selected-models keeps the original
+    # single-column in-plot legend.
+    legend_ncol=6 if args.all else 1,
+    legend_outside=args.all,
     output_path=str(Path("plots") / output_filename),
 )
 

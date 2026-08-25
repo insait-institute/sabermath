@@ -1,0 +1,18 @@
+# For: INF-Retriever-v1-Pro in math-vs-word's calc_sims.py --method
+# <hf-repo> run. Mirrors scripts/rerankers/envs/env_inf_retriever.yml
+# EXACTLY (transformers EXACT-pinned to 4.51.3 - NOT the >=4.51.0 floor
+# math-vs-word's own environment.yml effectively gets from unpinned
+# transformers, and NOT 4.51.0 exactly either - see that file's own header
+# for the two separate crashes those get you), plus tqdm for calc_sims.py's
+# own progress bars.
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+postinstall: |
+  pip install "transformers==4.51.3" "sentence-transformers==5.7.0" accelerate torch datasets numpy tqdm
+  pip install -e "$SABERMATH_REPO"

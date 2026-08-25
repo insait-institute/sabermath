@@ -1,47 +1,87 @@
 from datasets import load_dataset
 import argparse
+import multiprocessing as mp
 import yaml
 
 from load_models import ALLOWED_MODELS
 
-from sim_approach0 import calc_approach0_sims
-from sim_bm25 import calc_bm25_sims
-from sim_embeddings import calc_embedding_sims
-from sim_jaccard import calc_jaccard_sims
-from sim_tfidf import calc_tfidf_sims
+# Deliberately NOT imported up front: sim_jaccard/sim_tfidf/sim_approach0
+# all pull in pya0 (via sim_helpers.py), and sim_tfidf also needs
+# scikit-learn - neither is needed by an embedding-model or bm25 run, and a
+# missing optional dependency for ONE method must not take down every other
+# method (confirmed the hard way: a bare `from sim_approach0 import ...` at
+# module level here made even --method bm25 crash on ModuleNotFoundError:
+# pya0, before ever reaching bm25's own code). Each is imported only inside
+# the branch that actually needs it, below - same principle as
+# sabermath/processors/__init__.py's own guarded imports for these same
+# three legacy methods.
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--config_file")
-parser.add_argument("--method")
-parser.add_argument("--force_recalc", action="store_true")
-args = parser.parse_args()
 
-config_file_path = args.config_file
-method = args.method
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_file")
+    parser.add_argument("--method")
+    parser.add_argument("--force_recalc", action="store_true")
+    args = parser.parse_args()
 
-if method not in ALLOWED_MODELS + ["jaccard", "approach0", "tf-idf", "bm25"]:
-    raise ValueError(f"Unknown method {method}")
+    config_file_path = args.config_file
+    method = args.method
 
-with open(config_file_path, "r") as f:
-    config = yaml.safe_load(f)
+    if method not in ALLOWED_MODELS + ["jaccard", "approach0", "tf-idf", "bm25"]:
+        raise ValueError(f"Unknown method {method}")
 
-fixed_targets_dataset = config["hf_datasets"]["targets_maths_words_fixed"]
-fixed_candidates_dataset = config["hf_datasets"]["candidates_maths_words_fixed"]
+    with open(config_file_path, "r") as f:
+        config = yaml.safe_load(f)
 
-good_targets = load_dataset(fixed_targets_dataset)["train"]
-good_candidates = load_dataset(fixed_candidates_dataset)["train"]
+    fixed_targets_dataset = config["hf_datasets"]["targets_maths_words_fixed"]
+    fixed_candidates_dataset = config["hf_datasets"]["candidates_maths_words_fixed"]
 
-if method in ALLOWED_MODELS:
-    calc_embedding_sims(method, good_targets, good_candidates, args.force_recalc)
+    good_targets = load_dataset(fixed_targets_dataset)["train"]
+    good_candidates = load_dataset(fixed_candidates_dataset)["train"]
 
-elif method == "jaccard":
-    calc_jaccard_sims(good_targets, good_candidates)
+    if method in ALLOWED_MODELS:
+        from sim_embeddings import calc_embedding_sims
 
-elif method == "approach0":
-    calc_approach0_sims(good_targets, good_candidates)
+        calc_embedding_sims(method, good_targets, good_candidates, args.force_recalc)
 
-elif method == "tf-idf":
-    calc_tfidf_sims(good_targets, good_candidates)
+    elif method == "jaccard":
+        from sim_jaccard import calc_jaccard_sims
 
-elif method == "bm25":
-    calc_bm25_sims(good_targets, good_candidates)
+        calc_jaccard_sims(good_targets, good_candidates)
+
+    elif method == "approach0":
+        from sim_approach0 import calc_approach0_sims
+
+        calc_approach0_sims(good_targets, good_candidates)
+
+    elif method == "tf-idf":
+        from sim_tfidf import calc_tfidf_sims
+
+        calc_tfidf_sims(good_targets, good_candidates)
+
+    elif method == "bm25":
+        from sim_bm25 import calc_bm25_sims
+
+        calc_bm25_sims(good_targets, good_candidates)
+
+
+if __name__ == "__main__":
+    # Required for RaDeRRerankerVLLMProcessor specifically (confirmed on
+    # jobs 738673/738698, reproduced identically on two different nodes):
+    # this script previously ran entirely as bare top-level module code
+    # with no `if __name__ == "__main__":` guard at all, and relied on
+    # Python's platform-default multiprocessing start method (fork on
+    # Linux). That combination is exactly what
+    # https://docs.python.org/3/library/multiprocessing.html#the-spawn-and-forkserver-start-methods
+    # warns is unsafe once anything in-process later tries to spawn a
+    # subprocess (here: vLLM's own EngineCore, right after this model's
+    # one-off PEFT LoRA merge) - it raised "An attempt has been made to
+    # start a new process before the current process has finished its
+    # bootstrapping phase." Every OTHER vLLM-backed model in this sweep
+    # happened not to trip it, but the underlying hazard was latent for
+    # all of them too. scripts/run_rerankers.py's own main() sets this
+    # exact start method for exactly this reason - mirroring it here
+    # rather than special-casing just the one model that happened to
+    # surface it.
+    mp.set_start_method("spawn", force=True)
+    main()
