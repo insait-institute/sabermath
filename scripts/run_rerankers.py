@@ -1,9 +1,9 @@
 """Evaluate the SABER-Math rerankers that need custom scoring logic (rank1
 0.5B/7B/32B, Qwen3-Reranker 0.6B/4B/8B, GTE-ModernColBERT,
 Reason-ModernColBERT, ReasonIR, SPLADE-code 0.6B/8B, RaDeR bi-encoders
-3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B, INF-Retriever-v1-Pro),
-plus the models that run through the generic HuggingFace path
-(Qwen3-Embedding-8B, Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B),
+3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B, INF-Retriever-v1-Pro,
+INF-X-Retriever), plus the models that run through the generic HuggingFace
+path (Qwen3-Embedding-8B, Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B),
 across all three tasks (statement-statement, statement-full, full-full).
 
 Each model/task run is checkpointed after every query to
@@ -28,11 +28,13 @@ one-off LoRA merge): rank1, diver-grouprank, every qwen3-reranker,
 reasonir-8b, the rader bi-encoders + reranker, and all four GENERIC_MODELS.
 Only three exceptions still need their own envs - GTE/Reason-ModernColBERT
 (pylate pins sentence-transformers==5.3.0, env_colbert.yml), SPLADE
-(SparseEncoder, env_splade.yml), and inf-retriever-v1-pro
-(SentenceTransformers production path, env_inf_retriever.yml - its
-bidirectional remote-code attention has no VALIDATED vLLM recipe yet, see
-_build_inf_retriever_processor, and that remote code needs
-transformers==4.51.0 exactly, see the env's header).
+(SparseEncoder, env_splade.yml), and the inf-retriever-v1-pro /
+inf-x-retriever pair (SentenceTransformers production path,
+env_inf_retriever.yml - the retriever's bidirectional remote-code
+attention has no VALIDATED vLLM recipe yet, see
+_build_inf_retriever_processor, and that remote code needs the exact
+transformers==4.51.x pin, see the env's header; the INF-X aligner is a
+standard Qwen2.5 chat model happy in the same env).
 env_st_biencoders.yml remains only for the LEGACY reference paths
 (scripts/test_vllm_feasibility.py). Still run this script once per model
 (or per same-env family), each in its own process:
@@ -74,9 +76,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sabermath import evaluate
 from sabermath.data import load_data
+from sabermath.instructions import INSTRUCTIONS
 from sabermath.processors import (
+    Approach0Processor,
+    BM25Processor,
     ColBERTProcessor,
+    GoogleProcessor,
     GroupRankProcessor,
+    INFXRetrieverProcessor,
+    JaccardProcessor,
+    OpenAIProcessor,
+    OpenRouterEmbeddingProcessor,
     Qwen3RerankerProcessor,
     Qwen3RerankerVLLMProcessor,
     RaDeRRerankerProcessor,
@@ -85,6 +95,7 @@ from sabermath.processors import (
     ReasonIRProcessor,
     SentenceTransformersProcessor as STProcessor,
     SpladeProcessor,
+    TfidfProcessor,
     VLLMProcessor,
 )
 from sabermath.schemas import Branch, Task
@@ -259,20 +270,16 @@ def _build_inf_retriever_processor(model_name: str = "infly/inf-retriever-v1-pro
       essentially no benchmark document comes near it (only 0.32% exceed
       even 2048 tokens), so ST's silent truncation at 32768 is a no-op in
       practice.
-    """
-    from sentence_transformers import SentenceTransformer
 
-    st = SentenceTransformer(
-        model_name,
-        trust_remote_code=True,
-        model_kwargs={"torch_dtype": "auto"},
-    )
-    transformer = st[0]
-    if "message" in getattr(transformer, "modality_config", {}):
-        transformer.modality_config = {
-            k: v for k, v in transformer.modality_config.items() if k != "message"
-        }
-    return STProcessor(st, model_name)
+    The actual ST construction lives in
+    sabermath.processors.infx_retriever_processor.build_inf_retriever_st -
+    promoted there (2026-08-21) so the INF-X-Retriever composition reuses
+    the byte-identical retriever backend and the standalone-vs-INF-X
+    comparison isolates the query rewrite alone.
+    """
+    from sabermath.processors import build_inf_retriever_st
+
+    return STProcessor(build_inf_retriever_st(model_name), model_name)
 
 
 CUSTOM_MODEL_BUILDERS = {
@@ -340,6 +347,28 @@ CUSTOM_MODEL_BUILDERS = {
     # bidirectional remote-code attention with no VALIDATED vLLM path yet.
     # See _build_inf_retriever_processor.
     "inf-retriever-v1-pro": lambda tp: _build_inf_retriever_processor(),
+    # INF-X-Retriever: the full infly SYSTEM the standalone model above was
+    # built for - inf-query-aligner rewrites each query (official prompt +
+    # the checkpoint's own sampling params, made reproducible via
+    # per-query-content seeding), then the REWRITE is embedded with the
+    # official instruct prefix against prefix-less documents, through the
+    # byte-identical retriever backend as the standalone entry (so the two
+    # rows isolate the rewrite+prefix effect). Recipe verified against the
+    # team's own code (github.com/yaoyichen/INF-X-Retriever) - see
+    # INFXRetrieverProcessor's module docstring for the full audit.
+    # Deliberately NOT in scripts/test_vllm_feasibility.py: the harness
+    # compares deterministic scoring paths of single models; this entry's
+    # retriever half is already covered by inf-retriever-v1-pro's candidate
+    # there, and its generative half has no reference to regress against.
+    # Two 7B models co-resident on one GPU (~30GB in bf16+fp16) - fine on
+    # an H200, no tensor parallelism. The rewrite log makes every generated
+    # rewrite inspectable after the run (and warm-starts resumes; the
+    # per-query seeding makes regeneration byte-identical either way) -
+    # kept under the default save dir so the region sync ships it back to
+    # the canonical host with the results.
+    "inf-x-retriever": lambda tp: INFXRetrieverProcessor(
+        rewrite_log_path="results/rerankers/.rewrites/inf-x-retriever.json"
+    ),
 }
 
 # Custom models where --tensor-parallel-size is actually honored (everything
@@ -417,6 +446,131 @@ GENERIC_MODELS = {
 GENERIC_MODELS_USE_TP = {"qwen3-embedding-8b"}  # vLLM-backed -> tp actually used
 
 ALL_MODEL_KEYS = list(CUSTOM_MODEL_BUILDERS) + list(GENERIC_MODELS)
+
+_CHUNK512_SCORES_KWARGS = {"chunk_to_context": True, "context_length": 512}
+
+TABLE_MODELS = {
+    "qwen3-embedding-4b": {"model": "Qwen/Qwen3-Embedding-4B", "use_vllm": True},
+    "qwen3-embedding-0.6b": {
+        "model": "Qwen/Qwen3-Embedding-0.6B",
+        "use_vllm": True,
+    },
+    "harrier-oss-v1-270m": {
+        "model": "microsoft/harrier-oss-v1-270m",
+        "use_vllm": True,
+    },
+    "harrier-oss-v1-0.6b": {
+        "model": "microsoft/harrier-oss-v1-0.6b",
+        "use_vllm": True,
+    },
+    "harrier-oss-v1-27b": {
+        "model": "microsoft/harrier-oss-v1-27b",
+        "use_vllm": True,
+    },
+    "bge-m3": {"model": "BAAI/bge-m3", "use_vllm": True},
+    "llama-embed-nemotron-8b": {
+        "model": "nvidia/llama-embed-nemotron-8b",
+        "use_vllm": True,
+    },
+    "kalm-embedding-gemma3-12b-2511": {
+        "model": "tencent/KaLM-Embedding-Gemma3-12B-2511",
+        "use_vllm": True,
+    },
+    "embeddinggemma-300m": {"model": "google/embeddinggemma-300m", "use_vllm": True},
+    "jina-embeddings-v5-text-small": {
+        "model": "jinaai/jina-embeddings-v5-text-small",
+        "use_vllm": True,
+    },
+    "jina-embeddings-v5-text-nano": {
+        "model": "jinaai/jina-embeddings-v5-text-nano",
+        "use_vllm": False,
+        "init_kwargs": {
+            "trust_remote_code": True,
+            "device": "cuda",
+            "model_kwargs": {"dtype": "bfloat16", "default_task": "retrieval"},
+        },
+    },
+    "octen-embedding-4b": {"model": "Octen/Octen-Embedding-4B", "use_vllm": True},
+    "octen-embedding-8b": {"model": "Octen/Octen-Embedding-8B", "use_vllm": True},
+    "roberta-base": {
+        "model": "FacebookAI/roberta-base",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "MEAN", "normalize": False},
+            "max_model_len": 512,
+        },
+        "scores_kwargs": dict(_CHUNK512_SCORES_KWARGS),
+    },
+    "bert-base-uncased": {
+        "model": "google-bert/bert-base-uncased",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "MEAN", "normalize": False},
+            "export_clean": True,
+            "max_model_len": 512,
+        },
+        "scores_kwargs": dict(_CHUNK512_SCORES_KWARGS),
+    },
+    "multilingual-e5-large": {
+        "model": "intfloat/multilingual-e5-large",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "MEAN", "normalize": True},
+            "max_model_len": 512,
+        },
+        "scores_kwargs": dict(_CHUNK512_SCORES_KWARGS),
+    },
+}
+
+API_MODELS = {
+    "gemini-embedding-001": ("google", "gemini-embedding-001"),
+    "gemini-embedding-2": ("google", "gemini-embedding-2"),
+    "text-embedding-3-small": ("openrouter", "text-embedding-3-small"),
+    "text-embedding-3-large": ("openrouter", "text-embedding-3-large"),
+}
+
+LEXICAL_MODEL_BUILDERS = {
+    "bm25": BM25Processor,
+    "tf-idf": TfidfProcessor,
+    "jaccard": JaccardProcessor,
+    "approach0": Approach0Processor,
+}
+
+QWEN3_RERANKER_REPOS = {
+    "qwen3-reranker-8b": "Qwen/Qwen3-Reranker-8B",
+    "qwen3-reranker-4b": "Qwen/Qwen3-Reranker-4B",
+    "qwen3-reranker-0.6b": "Qwen/Qwen3-Reranker-0.6B",
+}
+
+COLBERT_REPOS = {
+    "gte-moderncolbert": "lightonai/GTE-ModernColBERT-v1",
+    "reason-moderncolbert": "lightonai/Reason-ModernColBERT",
+}
+
+INSTRUCTED_COLBERT_QUERY_LENGTH = 256
+INSTRUCTED_GROUPRANK_SCAFFOLD_RESERVE = 1280
+
+INSTRUCTION_EXCLUDED = {
+    "tf-idf": (
+        "its vocabulary is fitted on documents only and cosine scoring "
+        "dilutes real query terms, so instruction words act as pure noise"
+    ),
+    "jaccard": (
+        "instruction tokens inflate the query token-set union, distorting "
+        "every score monotonically"
+    ),
+    "approach0": (
+        "its _BROKEN_QUERIES md5 skip-list matches raw query text, so any "
+        "query rewrite reintroduces known segfaults"
+    ),
+}
+
+EXPERIMENT_MODEL_KEYS = (
+    ALL_MODEL_KEYS
+    + list(TABLE_MODELS)
+    + list(API_MODELS)
+    + list(LEXICAL_MODEL_BUILDERS)
+)
 
 
 def _merge_results(filepath: Path, model_key: str, new_output: dict) -> dict:
@@ -698,6 +852,252 @@ def _run_one(
         sys.exit(1)
 
 
+def _experiment_spec(model_key: str) -> dict | None:
+    if model_key in GENERIC_MODELS:
+        return GENERIC_MODELS[model_key]
+    if model_key in TABLE_MODELS:
+        return TABLE_MODELS[model_key]
+    return None
+
+
+def _experiment_scores_kwargs(model_key: str) -> dict:
+    if model_key in CUSTOM_MODEL_SCORES_KWARGS:
+        return dict(CUSTOM_MODEL_SCORES_KWARGS[model_key])
+    spec = _experiment_spec(model_key)
+    if spec is not None:
+        return dict(spec.get("scores_kwargs", {}))
+    return {}
+
+
+def _experiment_processor_slot(model_key: str, instruction_key: str) -> str:
+    if model_key in QWEN3_RERANKER_REPOS:
+        return f"qwen3__{instruction_key}"
+    if instruction_key != "p0" and (
+        model_key == "diver-grouprank-32b" or model_key in COLBERT_REPOS
+    ):
+        return "instructed"
+    return "default"
+
+
+def _build_spec_processor(
+    spec: dict, model_key: str, tensor_parallel_size: int
+):
+    spec = dict(spec)
+    model_name = spec.pop("model")
+    init_kwargs = dict(spec.pop("init_kwargs", {}))
+    use_vllm = spec.pop("use_vllm", False)
+    if not use_vllm:
+        return STProcessor.from_huggingface(model_name, **init_kwargs)
+    if model_key in GENERIC_MODELS_USE_TP and tensor_parallel_size > 1:
+        init_kwargs["tensor_parallel_size"] = tensor_parallel_size
+    return VLLMProcessor.from_huggingface(model_name, **init_kwargs)
+
+
+def _build_experiment_processor(
+    model_key: str,
+    instruction_key: str,
+    tensor_parallel_size: int,
+    save_dir: str,
+):
+    instruction = INSTRUCTIONS[instruction_key]
+    if model_key in QWEN3_RERANKER_REPOS and instruction is not None:
+        return Qwen3RerankerVLLMProcessor(
+            QWEN3_RERANKER_REPOS[model_key], task_instruction=instruction
+        )
+    if model_key == "diver-grouprank-32b" and instruction is not None:
+        return GroupRankProcessor(
+            tensor_parallel_size=max(1, tensor_parallel_size),
+            scaffold_reserve_tokens=INSTRUCTED_GROUPRANK_SCAFFOLD_RESERVE,
+        )
+    if model_key in COLBERT_REPOS and instruction is not None:
+        return ColBERTProcessor(
+            COLBERT_REPOS[model_key],
+            query_length=INSTRUCTED_COLBERT_QUERY_LENGTH,
+        )
+    if model_key == "inf-x-retriever":
+        return INFXRetrieverProcessor(
+            rewrite_log_path=str(
+                Path(save_dir) / ".rewrites" / "inf-x-retriever.json"
+            )
+        )
+    if model_key in CUSTOM_MODEL_BUILDERS:
+        return CUSTOM_MODEL_BUILDERS[model_key](tensor_parallel_size)
+    spec = _experiment_spec(model_key)
+    if spec is not None:
+        return _build_spec_processor(spec, model_key, tensor_parallel_size)
+    if model_key in API_MODELS:
+        kind, model_name = API_MODELS[model_key]
+        if kind == "google":
+            return GoogleProcessor(model_name)
+        if kind == "openrouter":
+            return OpenRouterEmbeddingProcessor(model_name)
+        return OpenAIProcessor(model_name)
+    if model_key in LEXICAL_MODEL_BUILDERS:
+        return LEXICAL_MODEL_BUILDERS[model_key]()
+    raise KeyError(f"Unknown experiment model key: {model_key}")
+
+
+def _run_one_experiment(
+    model_key: str,
+    save_dir: str,
+    tasks: list[str],
+    n: int | None,
+    seed: int,
+    tensor_parallel_size: int,
+    progress_every: int,
+    instruction_keys: list[str],
+    save_scores: bool,
+) -> None:
+    subset_key = f"n{n}_seed{seed}" if n is not None else "full"
+    suffix = "" if subset_key == "full" else f"__{subset_key}"
+
+    queries, documents = load_data()
+    domains = list(queries["domains"])
+    query_row_idxs = None
+
+    if n is not None:
+        rng = random.Random(seed)
+        query_row_idxs = sorted(
+            rng.sample(range(len(queries)), min(n, len(queries)))
+        )
+        queries = queries.select(query_row_idxs)
+        domains = [domains[i] for i in query_row_idxs]
+
+    processors: dict[str, object] = {}
+    task_scores_by_prompt: dict[str, dict[str, float]] = {}
+    failures: list[str] = []
+
+    for instruction_key in instruction_keys:
+        instruction_text = INSTRUCTIONS[instruction_key]
+        query_instruction = (
+            None if model_key in QWEN3_RERANKER_REPOS else instruction_text
+        )
+
+        filepath = Path(save_dir) / f"{model_key}__{instruction_key}{suffix}.json"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_dir = (
+            Path(save_dir)
+            / ".checkpoints"
+            / model_key
+            / f"{instruction_key}__{subset_key}"
+        )
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        (checkpoint_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "model_key": model_key,
+                    "instruction_key": instruction_key,
+                    "instruction_text": instruction_text,
+                    "query_instruction_applied": query_instruction is not None,
+                    "n": n,
+                    "seed": seed,
+                    "query_row_idxs": query_row_idxs,
+                    "k": 10,
+                    "dcg_variant": "exponent",
+                    "tasks": tasks,
+                },
+                indent=2,
+            )
+        )
+
+        progress_counter = {"n": 0}
+
+        def on_progress(
+            _filepath=filepath, _checkpoint_dir=checkpoint_dir, _counter=progress_counter
+        ) -> None:
+            if progress_every <= 0:
+                return
+            _counter["n"] += 1
+            if _counter["n"] % progress_every != 0:
+                return
+            partial = _partial_report_from_checkpoints(
+                model_key, _checkpoint_dir, tasks, domains
+            )
+            merged = _merge_results(_filepath, model_key, partial)
+            _filepath.write_text(json.dumps(merged, indent=2))
+            _sync_back_if_needed(save_dir)
+
+        print(f"\n[~] {model_key} / {instruction_key} ...")
+
+        try:
+            slot = _experiment_processor_slot(model_key, instruction_key)
+            if slot not in processors:
+                processors[slot] = _build_experiment_processor(
+                    model_key, instruction_key, tensor_parallel_size, save_dir
+                )
+            model = processors[slot]
+
+            report, ndcgs = evaluate(
+                model,
+                tasks=tasks,
+                queries=queries,
+                documents=documents,
+                return_ndcgs=True,
+                checkpoint_dir=checkpoint_dir,
+                on_progress=on_progress,
+                instruction=query_instruction,
+                save_scores=save_scores,
+                scores_kwargs=_experiment_scores_kwargs(model_key),
+            )
+
+            report_dict = report.to_dict()
+            report_dict["ndcgs_by_task"] = ndcgs
+            output = {"domains": domains, "reports": {model_key: report_dict}}
+
+            task_scores_by_prompt[instruction_key] = {
+                t["task"]: t["ndcg_at_k"] for t in report_dict["tasks"]
+            }
+
+            print(f"\n=== {model_key} / {instruction_key} ===")
+            for task in report_dict["tasks"]:
+                print(f"  {task['task']:<20} nDCG@10 = {task['ndcg_at_k']:.4f}")
+
+        except Exception as e:
+            failures.append(instruction_key)
+            tb = traceback.format_exc()
+            output = {
+                "domains": None,
+                "reports": {
+                    model_key: {
+                        "model": model_key,
+                        "error": str(e),
+                        "traceback": tb,
+                    }
+                },
+            }
+            print(f"\n[!!] {model_key} / {instruction_key} failed:")
+            print(tb)
+
+        output = _merge_results(filepath, model_key, output)
+        output["reports"][model_key]["prompt"] = {
+            "key": instruction_key,
+            "text": instruction_text,
+            "query_instruction_applied": query_instruction is not None,
+        }
+        filepath.write_text(json.dumps(output, indent=2))
+        print(f"[+] Wrote {filepath}")
+        _sync_back_if_needed(save_dir)
+
+    if task_scores_by_prompt:
+        p0_scores = task_scores_by_prompt.get("p0")
+        print(f"\n=== {model_key}: per-prompt nDCG@10 summary ===")
+        for instruction_key, by_task in task_scores_by_prompt.items():
+            parts = []
+            for task_name, score in by_task.items():
+                delta = ""
+                if (
+                    instruction_key != "p0"
+                    and p0_scores is not None
+                    and task_name in p0_scores
+                ):
+                    delta = f" ({score - p0_scores[task_name]:+.4f})"
+                parts.append(f"{task_name}={score:.4f}{delta}")
+            print(f"  {instruction_key}: " + " | ".join(parts))
+
+    if failures:
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -705,11 +1105,30 @@ def main() -> None:
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=ALL_MODEL_KEYS,
+        choices=EXPERIMENT_MODEL_KEYS,
         default=None,
-        help="Subset of models to run (default: all of them - see the "
-        "dependency isolation warning in this script's module docstring "
-        "before doing that in a single shared environment).",
+        help="Subset of models to run (default: all reranker-pipeline models "
+        "- see the dependency isolation warning in this script's module "
+        "docstring before doing that in a single shared environment). The "
+        "embedding-table/API/lexical keys are valid only together with "
+        "--instructions.",
+    )
+    parser.add_argument(
+        "--instructions",
+        nargs="+",
+        choices=list(INSTRUCTIONS),
+        default=None,
+        help="Run the instruction-prompt experiment for these prompt keys "
+        "(p0 = no instruction baseline). Switches output naming to "
+        "<model>__<key>[__subset].json with per-(model,prompt) checkpoints; "
+        "omit entirely for the legacy production behavior.",
+    )
+    parser.add_argument(
+        "--save-scores",
+        action="store_true",
+        help="Persist per-query raw candidate scores and the applied ranking "
+        "to <checkpoint-dir>/<task>.scores.json (requires --instructions; "
+        "use --instructions p0 for baseline score capture).",
     )
     parser.add_argument(
         "--task",
@@ -751,26 +1170,76 @@ def main() -> None:
     models = args.models or ALL_MODEL_KEYS
     tasks = [args.task] if args.task else ALL_TASKS
 
+    instruction_keys = None
+    if args.instructions is not None:
+        instruction_keys = list(dict.fromkeys(args.instructions))
+        instructed = [k for k in instruction_keys if k != "p0"]
+        if instructed:
+            for model_key in models:
+                if model_key in INSTRUCTION_EXCLUDED:
+                    parser.error(
+                        f"{model_key} cannot run instructed prompts "
+                        f"({', '.join(instructed)}): "
+                        f"{INSTRUCTION_EXCLUDED[model_key]}. "
+                        "Only --instructions p0 is valid for it."
+                    )
+    else:
+        if args.save_scores:
+            parser.error(
+                "--save-scores requires --instructions (use --instructions "
+                "p0 for baseline score capture) so it can never resume a "
+                "pre-capture production checkpoint."
+            )
+        for model_key in models:
+            if (
+                model_key not in CUSTOM_MODEL_BUILDERS
+                and model_key not in GENERIC_MODELS
+            ):
+                parser.error(
+                    f"{model_key} is only wired through the instruction "
+                    "experiment - pass --instructions (p0 for a plain "
+                    "baseline run)."
+                )
+
     ctx = mp.get_context("spawn")
     failures = []
 
     for i, model_key in enumerate(models, start=1):
         print("\n" + "#" * 60)
-        print(f"# Running {model_key} ({i}/{len(models)}) | tasks={tasks}")
+        print(
+            f"# Running {model_key} ({i}/{len(models)}) | tasks={tasks}"
+            + (f" | instructions={instruction_keys}" if instruction_keys else "")
+        )
         print("#" * 60)
 
-        p = ctx.Process(
-            target=_run_one,
-            args=(
-                model_key,
-                args.save_to,
-                tasks,
-                args.n,
-                args.seed,
-                args.tensor_parallel_size,
-                args.progress_every,
-            ),
-        )
+        if instruction_keys is None:
+            p = ctx.Process(
+                target=_run_one,
+                args=(
+                    model_key,
+                    args.save_to,
+                    tasks,
+                    args.n,
+                    args.seed,
+                    args.tensor_parallel_size,
+                    args.progress_every,
+                ),
+            )
+        else:
+            p = ctx.Process(
+                target=_run_one_experiment,
+                args=(
+                    model_key,
+                    args.save_to,
+                    tasks,
+                    args.n,
+                    args.seed,
+                    args.tensor_parallel_size,
+                    args.progress_every,
+                    instruction_keys,
+                    args.save_scores,
+                ),
+            )
         p.start()
         p.join()
 
