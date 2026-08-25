@@ -6,6 +6,7 @@ from .unknown_processor import UnknownProcessor
 
 from .google_processor import GoogleProcessor
 from .openai_processor import OpenAIProcessor
+from .openrouter_processor import OpenRouterEmbeddingProcessor
 
 # The legacy/lexical baselines (BM25, TF-IDF, Jaccard) depend on the
 # optional "legacy" extra (rank_bm25, scikit-learn, pya0 - see
@@ -48,3 +49,8 @@ from .rader_reranker_processor import RaDeRRerankerProcessor
 # cheap as the rest.
 from .qwen3_reranker_vllm_processor import Qwen3RerankerVLLMProcessor
 from .rader_reranker_vllm_processor import RaDeRRerankerVLLMProcessor
+
+# INF-X-Retriever: infly's composed query-aligner + dense-retriever system
+# (and the shared, validated ST load recipe for the standalone
+# inf-retriever-v1-pro entry). Heavy deps imported lazily at construction.
+from .infx_retriever_processor import INFXRetrieverProcessor, build_inf_retriever_st

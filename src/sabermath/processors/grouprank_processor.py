@@ -138,6 +138,7 @@ class GroupRankProcessor(ModelProcessor):
         max_doc_chars: int = 3000,
         max_gen_tokens: int = 8000,
         seed: int = 666,
+        scaffold_reserve_tokens: int = 1024,
     ) -> None:
         self._model_name = model_name
         self._tensor_parallel_size = tensor_parallel_size
@@ -149,6 +150,7 @@ class GroupRankProcessor(ModelProcessor):
         self._max_doc_chars = max_doc_chars
         self._max_gen_tokens = max_gen_tokens
         self._seed = seed
+        self._scaffold_reserve_tokens = scaffold_reserve_tokens
 
         self._llm = None
         self._sampling_params = None
@@ -192,7 +194,7 @@ class GroupRankProcessor(ModelProcessor):
         # ~1024 tokens covers the system prompt, user template, chat-template
         # wrapping, and per-document "[i]. " markers for a 20-document group.
         budget = (
-            self._max_model_len - self._max_gen_tokens - 1024
+            self._max_model_len - self._max_gen_tokens - self._scaffold_reserve_tokens
         ) // self._group_size
         doc_ids = self._tokenizer(document, add_special_tokens=False).input_ids
         if len(doc_ids) > budget:

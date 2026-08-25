@@ -97,6 +97,13 @@ class GoogleProcessor(EmbeddingProcessor):
             except Exception as e:
                 last_error = e
 
+                status = getattr(e, "code", None) or getattr(e, "status_code", None)
+                if status in (401, 403):
+                    raise RuntimeError(
+                        f"Gemini auth error ({status}) - not retrying; check "
+                        "GEMINI_API_KEY / .geminitok."
+                    ) from e
+
                 if attempt < retries - 1:
                     await asyncio.sleep(2**attempt)
 

@@ -26,9 +26,11 @@ class ColBERTProcessor(ModelProcessor):
         *,
         encode_batch_size: int = 32,
         model_kwargs: dict | None = None,
+        query_length: int | None = None,
     ) -> None:
         self._model_name = model_name
         self._encode_batch_size = encode_batch_size
+        self._query_length = query_length
         # torch_dtype bfloat16 by default (2026-08-21, precision-fairness
         # rollout: no model computes in fp32 anymore). NOTE this one is a
         # deliberate deviation from the checkpoints (both ModernColBERT
@@ -57,9 +59,13 @@ class ColBERTProcessor(ModelProcessor):
                 raise ImportError(
                     "Please install pylate to use ColBERTProcessor"
                 ) from e
+            colbert_kwargs = {}
+            if self._query_length is not None:
+                colbert_kwargs["query_length"] = self._query_length
             self._model = models.ColBERT(
                 model_name_or_path=self._model_name,
                 model_kwargs=self._model_kwargs,
+                **colbert_kwargs,
             )
         return self._model
 
