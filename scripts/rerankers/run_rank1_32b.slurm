@@ -63,14 +63,21 @@ if [[ "$(hostname)" != "$SABERMATH_CANONICAL_HOST" ]]; then
   # died elsewhere and got synced back) or takes the canonical version when
   # this node has nothing yet, but never regresses a checkpoint that's
   # already further along locally (e.g. resubmitting on the same node).
-  rsync -auz --exclude=".git" \
-    "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/" "./" || {
-    echo "[!!] Pulling the repo from $SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH failed."
+  set +e
+  rsync -auz --exclude=".git" --exclude="*.tmp" --exclude=".*.??????" \
+    "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/" "./"
+  rsync_rc=$?
+  set -e
+  if [[ $rsync_rc -ne 0 && $rsync_rc -ne 23 && $rsync_rc -ne 24 ]]; then
+    echo "[!!] Pulling the repo from $SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH failed (rsync exit $rsync_rc)."
     echo "[!!] This node's home storage has no usable copy, so the job cannot continue."
     echo "[!!] Check SSH reachability/keys from $(hostname) to $SABERMATH_CANONICAL_HOST,"
     echo "[!!] and that the canonical path exists there (override via SABERMATH_CANONICAL_HOST/_PATH)."
     exit 1
-  }
+  fi
+  if [[ $rsync_rc -eq 23 || $rsync_rc -eq 24 ]]; then
+    echo "[~] rsync reported vanished/unreadable source files (exit $rsync_rc) - another job was checkpointing on the canonical host mid-pull; continuing."
+  fi
   # Belt-and-braces: even a "successful" rsync against a wrong/empty source
   # leaves an unusable tree - fail loudly now, not at some later source/cd.
   if [[ ! -f scripts/rerankers/_common.sh ]]; then

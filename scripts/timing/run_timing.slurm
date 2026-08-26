@@ -68,14 +68,21 @@ export SABERMATH_CANONICAL_HOST="${SABERMATH_CANONICAL_HOST:-hala}"
 export SABERMATH_CANONICAL_PATH="${SABERMATH_CANONICAL_PATH:-/home/ivo_petrov/sabermath}"
 if [[ "$(hostname)" != "$SABERMATH_CANONICAL_HOST" ]]; then
   echo "[~] Syncing latest code + any existing progress from $SABERMATH_CANONICAL_HOST (this node's home storage may not be the canonical copy)..."
-  rsync -auz --exclude=".git" \
-    "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/" "./" || {
-    echo "[!!] Pulling the repo from $SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH failed."
+  set +e
+  rsync -auz --exclude=".git" --exclude="*.tmp" --exclude=".*.??????" \
+    "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/" "./"
+  rsync_rc=$?
+  set -e
+  if [[ $rsync_rc -ne 0 && $rsync_rc -ne 23 && $rsync_rc -ne 24 ]]; then
+    echo "[!!] Pulling the repo from $SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH failed (rsync exit $rsync_rc)."
     echo "[!!] This node's home storage has no usable copy, so the job cannot continue."
     echo "[!!] Check SSH reachability/keys from $(hostname) to $SABERMATH_CANONICAL_HOST,"
     echo "[!!] and that the canonical path exists there (override via SABERMATH_CANONICAL_HOST/_PATH)."
     exit 1
-  }
+  fi
+  if [[ $rsync_rc -eq 23 || $rsync_rc -eq 24 ]]; then
+    echo "[~] rsync reported vanished/unreadable source files (exit $rsync_rc) - another job was checkpointing on the canonical host mid-pull; continuing."
+  fi
   # Belt-and-braces: even a "successful" rsync against a wrong/empty source
   # leaves an unusable tree - fail loudly now, not at some later source/cd.
   if [[ ! -f scripts/rerankers/_common.sh ]]; then
@@ -124,7 +131,7 @@ declare -A MODEL_ENV_YML=(
   [splade-code-0.6b]="scripts/rerankers/envs/env_splade.yml"
   [gte-moderncolbert]="scripts/rerankers/envs/env_colbert.yml"
   [reason-moderncolbert]="scripts/rerankers/envs/env_colbert.yml"
-  [reasonir-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  [reasonir-8b]="scripts/rerankers/envs/env_reasonir.yml"
   [reason-embed-qwen3-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
   [diver-retriever-4b]="scripts/rerankers/envs/env_vllm_feas.yml"
   [diver-retriever-0.6b]="scripts/rerankers/envs/env_vllm_feas.yml"
@@ -133,8 +140,10 @@ declare -A MODEL_ENV_YML=(
   [rader-14b]="scripts/rerankers/envs/env_vllm_feas.yml"
   # SentenceTransformers production path (bidirectional remote code, no
   # validated vLLM recipe yet) - same env as its reranker launcher; its
-  # remote code needs the exact transformers==4.51.0 pin in there.
+  # remote code needs the exact transformers==4.51.x pin in there.
   [inf-retriever-v1-pro]="scripts/rerankers/envs/env_inf_retriever.yml"
+  # Composed system (aligner is a standard Qwen2.5 chat model, same env).
+  [inf-x-retriever]="scripts/rerankers/envs/env_inf_retriever.yml"
   # env_vllm_feas installs peft, which the one-off LoRA merge needs.
   [rader-reranker-7b]="scripts/rerankers/envs/env_vllm_feas.yml"
   [qwen3-embedding-8b]="scripts/rerankers/envs/env_vllm_feas.yml"

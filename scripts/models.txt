@@ -8,11 +8,11 @@ nvidia/llama-embed-nemotron-8b --driver vllm
 tencent/KaLM-Embedding-Gemma3-12B-2511 --driver vllm
 FacebookAI/roberta-base --driver vllm --init-kwargs '{"pooler_config":{"pooling_type":"MEAN","normalize":false},"max_model_len":512}' --encode-kwargs '{"chunk_to_context": true, "context_length": 512}'
 google-bert/bert-base-uncased --driver vllm --init-kwargs '{"pooler_config":{"pooling_type":"MEAN","normalize":false},"export_clean":true,"max_model_len":512}' --encode-kwargs '{"chunk_to_context": true, "context_length": 512}'
-google/embeddinggemma-300m --driver vllm
+google/embeddinggemma-300m --driver vllm --encode-kwargs '{"query_prompt":"task: search result | query: ","document_prompt":"title: none | text: "}'
 intfloat/multilingual-e5-large --driver vllm --init-kwargs '{"pooler_config":{"pooling_type":"MEAN","normalize":true},"max_model_len":512}' --encode-kwargs '{"chunk_to_context": true, "context_length": 512}'
 microsoft/harrier-oss-v1-27b --driver vllm
-jinaai/jina-embeddings-v5-text-nano --driver st --init-kwargs '{"trust_remote_code":true,"device":"cuda","model_kwargs":{"dtype":"bfloat16","default_task":"retrieval"}}'
-jinaai/jina-embeddings-v5-text-small --driver vllm
+jinaai/jina-embeddings-v5-text-nano --driver st --clear-st-default-prompt --init-kwargs '{"trust_remote_code":true,"device":"cuda","model_kwargs":{"dtype":"bfloat16","default_task":"retrieval"}}' --encode-kwargs '{"query_prompt": "Query: ", "document_prompt": "Document: "}'
+jinaai/jina-embeddings-v5-text-small --driver vllm --encode-kwargs '{"query_prompt": "Query: ", "document_prompt": "Document: "}'
 Octen/Octen-Embedding-4B --driver vllm
 Octen/Octen-Embedding-8B --driver vllm
 # NOTES (2026-08-20 vLLM-default rollout - recipes validated in

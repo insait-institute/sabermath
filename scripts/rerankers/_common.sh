@@ -42,15 +42,28 @@ export SABERMATH_REPO="$(pwd)"
 #      same limitation as any exit-handler - a bare SIGKILL skips it, which
 #      is exactly why (1) exists too).
 SABERMATH_CANONICAL_HOST="${SABERMATH_CANONICAL_HOST:-hala}"
-SABERMATH_CANONICAL_PATH="${SABERMATH_CANONICAL_PATH:-/home/maria_drencheva/sabermath}"
+SABERMATH_CANONICAL_PATH="${SABERMATH_CANONICAL_PATH:-/home/ivo_petrov/sabermath}"
 
 sync_back_to_canonical() {
   [[ "${NEEDS_REGION_SYNC:-0}" == "1" ]] || return 0
   echo "[~] Syncing results back to $SABERMATH_CANONICAL_HOST (this node's home storage isn't the canonical copy)..."
-  if rsync -auz results/ "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/results/"; then
+  # Exit 23 (partial transfer) and 24 (source file vanished) are NORMAL here:
+  # this job's own checkpoint writer renames *.json.tmp into place constantly,
+  # so a concurrent rsync will always race some of them. Treating those as
+  # failure strands a finished result on a region-local filesystem - which is
+  # exactly what happened to the 2026-08-25 timing sweep. The *.tmp files are
+  # excluded outright, and the two vanish codes are tolerated.
+  set +e
+  rsync -auz --exclude="*.tmp" --exclude=".*.??????" \
+    results/ "$SABERMATH_CANONICAL_HOST:$SABERMATH_CANONICAL_PATH/results/"
+  local rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
     echo "[+] Synced."
+  elif [[ $rc -eq 23 || $rc -eq 24 ]]; then
+    echo "[+] Synced (rsync exit $rc: some files were being rewritten mid-transfer; the next sync picks them up)."
   else
-    echo "[!!] Sync-back to $SABERMATH_CANONICAL_HOST failed - results remain only on $(hostname):$(pwd)/results until manually rsynced."
+    echo "[!!] Sync-back to $SABERMATH_CANONICAL_HOST failed (rsync exit $rc) - results remain only on $(hostname):$(pwd)/results until manually rsynced."
   fi
 }
 
@@ -83,8 +96,23 @@ fi
 if [[ -f .openroutertok ]]; then
   export OPENROUTER_API_KEY="$(cat .openroutertok)"
 fi
-if [[ -f .geminitok ]]; then
+if [[ -f .openaitok ]]; then
+  export OPENAI_API_KEY="$(cat .openaitok)"
+fi
+# google-genai's Client() gives GOOGLE_API_KEY precedence over
+# GEMINI_API_KEY, and #SBATCH --export=ALL ships the submitting shell's
+# environment into every job - so a stale GOOGLE_API_KEY there silently
+# overrides the intended credential. Confirmed the hard way (2026-08-20,
+# timing jobs 730141/730149). GEMINI_API_KEY is the source of truth: an
+# inherited GEMINI_API_KEY wins (2026-08-24: .geminitok went stale while the
+# submitting shell carried the fresh key), .geminitok is the fallback, and
+# GOOGLE_API_KEY is always pinned to whichever won so no inherited value can
+# override it.
+if [[ -z "${GEMINI_API_KEY:-}" && -f .geminitok ]]; then
   export GEMINI_API_KEY="$(cat .geminitok)"
+fi
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  export GOOGLE_API_KEY="$GEMINI_API_KEY"
 fi
 
 num_gpus=$(echo "$SLURM_GPUS_ON_NODE" | grep -o '[0-9]*' | head -1)

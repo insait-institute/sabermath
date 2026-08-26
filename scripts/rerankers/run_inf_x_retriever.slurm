@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=reranker_diver_grouprank_32b
+#SBATCH --job-name=reranker_inf_x_retriever
 #SBATCH --nodes=1
-#SBATCH --partition=non-reserved
+#SBATCH --partition=batch
 #SBATCH --constraint=type-gpu
 #SBATCH --gpus=h200:1
 #SBATCH --mem=120G
 #SBATCH --export=ALL
 #SBATCH --mail-type=ALL
-#SBATCH --time=3-0
-#SBATCH --output=/scratch/%u/logs/reranker_diver_grouprank_32b.log
-#SBATCH --error=/scratch/%u/logs/reranker_diver_grouprank_32b.error
+#SBATCH --time=1-0
+#SBATCH --output=/scratch/%u/logs/reranker_inf_x_retriever.log
+#SBATCH --error=/scratch/%u/logs/reranker_inf_x_retriever.error
 # --chdir: slurmd otherwise tries to chdir into the *submit-time* working
 # directory before the script runs - on a region whose home storage lacks
 # this repo (e.g. msp3) that path doesn't exist, so it logs a noisy
@@ -18,20 +18,19 @@
 #SBATCH --chdir=/tmp
 
 # Run from the sabermath repo root:
-#   sbatch scripts/rerankers/run_diver_grouprank_32b.slurm
-#   sbatch scripts/rerankers/run_diver_grouprank_32b.slurm --n 20   # smoke test first
-#   sbatch scripts/rerankers/run_diver_grouprank_32b.slurm --task statement-full
+#   sbatch scripts/rerankers/run_inf_x_retriever.slurm
+#   sbatch scripts/rerankers/run_inf_x_retriever.slurm --n 20   # smoke test first
 #
-# Diver's groupwise generative reranker (AQ-MedAI/Diver-GroupRank-32B),
-# served via vLLM - see GroupRankProcessor. Per query it scores 150
-# candidates as 8 groups of 20 x repeat_num=2 reshuffled epochs = 16
-# generations (with up to 8000 reasoning tokens each), so this is the
-# slowest new model - hence the rank1-32b-style 3-day limit. Resubmitting
-# the same command resumes from the per-query checkpoint. 32B in bf16 fits a
-# single H200; pass --tensor-parallel-size 2 (and bump --gpus) only if you
-# have first re-validated scores on a --n 20 subset, given rank1-32b's
-# history of tensor parallelism silently corrupting scores in this vLLM
-# version.
+# INF-X-Retriever: infly's composed system - inf-query-aligner (7B Qwen2.5
+# chat model, bf16) rewrites each query, inf-retriever-v1-pro (7B, fp16)
+# embeds the rewrite with the official instruct prefix against prefix-less
+# documents. Recipe audited against the team's own pipeline code
+# (github.com/yaoyichen/INF-X-Retriever) - see INFXRetrieverProcessor.
+# Both 7B models sit on one H200 (~30GB weights total). The rewrite
+# generation (~5-15s/query, sequential) dominates the runtime; the
+# per-query checkpoint/resume machinery makes a wall-clock kill lose at
+# most the in-flight query. Same env as run_inf_retriever_v1_pro.slurm -
+# identical yml, so mkenv reuses the already-built env on warm nodes.
 set -e
 
 # On a region whose home storage has NEVER held this repo (msp3 for this
@@ -43,14 +42,6 @@ set -e
 mkdir -p "${SABERMATH_REPO:-$HOME/sabermath}"
 cd "${SABERMATH_REPO:-$HOME/sabermath}"
 
-# Self-healing: some cluster regions have separate, unsynced home-directory
-# storage from the canonical EU copy (see scripts/rerankers/_common.sh).
-# Always pull a fresh copy over SSH unless we're literally on the canonical
-# host - a presence-only check isn't enough, since a node can have a
-# stale-but-present copy from an earlier sync. rsync is cheap/idempotent
-# when nothing has changed, so this is safe to run unconditionally on every
-# non-canonical node. -u (update mode) never regresses results/checkpoints
-# that are further along locally.
 export SABERMATH_CANONICAL_HOST="${SABERMATH_CANONICAL_HOST:-hala}"
 export SABERMATH_CANONICAL_PATH="${SABERMATH_CANONICAL_PATH:-/home/ivo_petrov/sabermath}"
 if [[ "$(hostname)" != "$SABERMATH_CANONICAL_HOST" ]]; then
@@ -81,7 +72,16 @@ fi
 
 source scripts/rerankers/_common.sh
 
-mkenv -n reranker-grouprank -f scripts/rerankers/envs/env_vllm.yml -- \
-  python scripts/run_rerankers.py --models diver-grouprank-32b "$@"
+# Two 7B models + variable-length batches: same allocator-fragmentation
+# precaution as the other ST-path launchers.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# Same env NAME as run_inf_retriever_v1_pro.slurm on purpose (identical
+# yml) - mkenv returns the existing build instead of duplicating ~10GB per
+# node. Bump BOTH launchers together if env_inf_retriever.yml's pins ever
+# change (mkenv reuses a name without re-checking the yml - see that
+# file's header).
+mkenv -n reranker-inf-retriever-v1-pro-tf4513 -f scripts/rerankers/envs/env_inf_retriever.yml -- \
+  python scripts/run_rerankers.py --models inf-x-retriever "$@"
 
 echo "Done."

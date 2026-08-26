@@ -62,6 +62,8 @@ Usage:
 """
 
 import argparse
+import contextlib
+import fcntl
 import json
 import multiprocessing as mp
 import os
@@ -76,11 +78,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sabermath import evaluate
 from sabermath.data import load_data
-from sabermath.instructions import INSTRUCTIONS
+from sabermath.instructions import (
+    DEFAULT_INSTRUCTION_TEMPLATE,
+    INSTRUCTION_TEMPLATES,
+    INSTRUCTIONS,
+)
+from sabermath.processors.embedding_processor import AFFIX_KEYS
 from sabermath.processors import (
     Approach0Processor,
     BM25Processor,
     ColBERTProcessor,
+    EmbeddingProcessor,
     GoogleProcessor,
     GroupRankProcessor,
     INFXRetrieverProcessor,
@@ -103,6 +111,82 @@ from sabermath.schemas import Branch, Task
 BRANCHES = list(get_args(Branch))
 
 ALL_TASKS = list(get_args(Task))
+
+EXPERIMENT_COLBERT_QUERY_LENGTH = 256
+EXPERIMENT_GROUPRANK_SCAFFOLD_RESERVE = 1280
+
+# Qwen3-Reranker's own model-card default instruction. Used as the p0
+# baseline for that family so p0 measures "no task instruction" like every
+# other row does; DEFAULT_TASK_INSTRUCTION (the repo's production
+# math-specific instruction) is available as prompt key "pm".
+VENDOR_QWEN3_RERANKER_INSTRUCTION = (
+    "Given a web search query, retrieve relevant passages that answer the query"
+)
+
+# Models with no vendor-documented free-text instruction mechanism. Their
+# p1-p3 rows are CONTROLS (a flat control row is the evidence that the effect
+# on genuinely instructable models is real), not instruction-following
+# measurements - aggregate_instructions.py reports them in a separate block.
+# Deliberately NOT the same thing as INSTRUCTION_EXCLUDED, which hard-errors.
+INSTRUCTION_CONTROL_REASONS = {
+    "bge-m3": "vendor removed instruction prompting by design",
+    "bert-base-uncased": "no instruction mechanism (plain MLM encoder)",
+    "roberta-base": "no instruction mechanism (plain MLM encoder)",
+    "splade-code-0.6b": "prompts {}; prompt_type picks a top-k budget, not text",
+    "splade-code-8b": "prompts {}; prompt_type picks a top-k budget, not text",
+    "bm25": "lexical, no instruction mechanism",
+    "tf-idf": "lexical, no instruction mechanism",
+    "jaccard": "lexical, no instruction mechanism",
+    "bm25-no-tok": "lexical, no instruction mechanism",
+    "tf-idf-no-tok": "lexical, no instruction mechanism",
+    "jaccard-no-tok": "lexical, no instruction mechanism",
+    "approach0": "structure search engine, no instruction mechanism",
+    "embeddinggemma-300m": "fixed closed-set prompt grammar, free text is not the mechanism",
+    "multilingual-e5-large": "fixed query:/passage: prefixes, free text is not the mechanism",
+    "jina-embeddings-v5-text-nano": "fixed Query:/Document: prefixes + LoRA task adapter",
+    "jina-embeddings-v5-text-small": "fixed Query:/Document: prefixes + LoRA task adapter",
+    "gemini-embedding-001": "task_type enum API parameter, no free text",
+    "gemini-embedding-2": "task_type enum API parameter, no free text",
+    "text-embedding-3-small": "API exposes no instruction parameter at all",
+    "text-embedding-3-large": "API exposes no instruction parameter at all",
+    "gte-moderncolbert": "[Q]/[D] markers only, no task slot",
+    "reason-moderncolbert": "[Q]/[D] markers only, no task slot",
+    "rank1-0.5b": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-7b": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-32b": "no instruction slot; the vendor route is rewriting the query",
+    "diver-grouprank-32b": "fixed rubric template, no task slot",
+    "rader-reranker-7b": "query:/document: template, no instruction slot",
+}
+INSTRUCTION_CONTROL_MODELS = frozenset(INSTRUCTION_CONTROL_REASONS)
+
+# ReasonIR. Measured against the official remote-code encoder on 2026-08-25
+# (scripts/instructions/diagnose_protocol.py reasonir, saved to
+# results/protocol_diagnostics/reasonir_verdict.json). Its encode() does:
+#
+#     batch = [instruction + text + embed_eos for text in texts]
+#     outputs = self(**inputs)                      # full bidirectional pass
+#     if instruction: attention_mask[:, :len(instruction_tokens)] = 0
+#     embeddings = self.pooling(last_hidden_state, attention_mask)
+#
+# so with instruction="" - the document side, and the whole prompt-free
+# protocol - it prepends NOTHING. Sending bare text through the production
+# vLLM mean pooler therefore reproduces the official vectors to cosine
+# 0.9999 (Spearman 1.0 on candidate ranking), while adding an "<|embed|>\n"
+# wrapper DROPS that agreement to 0.879: the wrapper tokens end up inside
+# vLLM's mean, where the official code has them masked out. Prompt-free is
+# the faithful configuration here, not a deviation from one.
+#
+# For the instructed arms the official mechanism is "prepend
+# <|user|>\n{task}\n<|embed|>\n, then exclude exactly those tokens from the
+# pool". vLLM cannot exclude them, and both vLLM approximations land at
+# cosine ~0.80 / Spearman 0.93 against the official encoder. The exact route
+# is ReasonIRProcessor with per-side encode kwargs, which
+# EmbeddingProcessor.get_scores now supports directly:
+REASONIR_QUERY_INSTRUCTION_SLOT = "<|user|>\n{instruction}\n<|embed|>\n"
+
+# Tokenizer EOS expected by the RaDeR bi-encoder envelope below; checked at
+# smoke time by scripts/instructions/verify_protocol.py.
+RADER_EXPECTED_EOS = "<|im_end|>"
 
 # Models needing a custom ModelProcessor (not resolvable from a bare HF name).
 # rank1-32b's Processor CAN take tensor_parallel_size > 1 (vLLM generation,
@@ -302,21 +386,15 @@ CUSTOM_MODEL_BUILDERS = {
     ),
     "gte-moderncolbert": lambda tp: ColBERTProcessor("lightonai/GTE-ModernColBERT-v1"),
     "reason-moderncolbert": lambda tp: ColBERTProcessor("lightonai/Reason-ModernColBERT"),
-    # reasonir-8b: vLLM-backed since 2026-08-20. vllm==0.26.0 has no
-    # ReasonIRModel implementation, but ReasonIR IS a bidirectional-attention
-    # Llama with mean pooling - exactly vLLM's LlamaBidirectionalModel
-    # (llama-embed-nemotron's arch), so the architecture name is remapped and
-    # the "pooling" config attr that impl reads is injected. NEAR-MATCH vs
-    # the remote-code HF path (Spearman 0.9913, |dNDCG@10| 0.0014) - the
-    # published full-run number predates this switch (legacy provenance).
-    "reasonir-8b": lambda tp: VLLMProcessor.from_huggingface(
-        "reasonir/ReasonIR-8B",
-        hf_overrides={
-            "architectures": ["LlamaBidirectionalModel"],
-            "pooling": "avg",
-        },
-        pooler_config={"pooling_type": "MEAN", "normalize": True},
-    ),
+    # reasonir-8b: the official remote-code path (reverted from vLLM on
+    # 2026-08-25). vLLM cannot reproduce the one thing that makes ReasonIR's
+    # instruction mechanism work - its encode() runs a full bidirectional
+    # pass over "instruction + text + embed_eos" and then zeroes the
+    # instruction positions in the POOLING mask, which a stock MEAN pooler
+    # has no way to express. Prompt-free the two agree to cosine 0.9999, so
+    # this also restores the provenance of the published number, which
+    # predates the vLLM switch. See REASONIR_INSTRUCTION_NOTE.
+    "reasonir-8b": lambda tp: ReasonIRProcessor(),
     "splade-code-8b": lambda tp: SpladeProcessor(),
     # NOTE the 0.6B repo really is named "splade-code-06B" (no dot) -
     # verified against the HF API; "naver/splade-code-0.6B" does not exist.
@@ -383,10 +461,28 @@ CUSTOM_MODELS_USE_TP = {"diver-grouprank-32b"}
 # stay preprocessing-identical across backends and sizes). batch_size was
 # dropped when the family moved to vLLM (2026-08-20): it was an ST-side OOM
 # guard; vLLM schedules/batches internally.
+#
+# The query_prompt/document_prompt/query_suffix/document_suffix entries are
+# the vendor-documented input envelope for each model (see
+# scripts/instructions/PROTOCOL.md): EmbeddingProcessor.get_scores applies
+# them per side, before the vector cache, so an affixed text is simply a new
+# cache key. --legacy strips every one of them, reproducing the pre-2026-08-25
+# prompt-free runs.
+#
+# RaDeR: their retrievers.py builds "query: {instruction}{query}<|im_end|>"
+# and "document: {doc}<|im_end|>" with last-token pooling; we sent raw text
+# with neither marker nor EOS.
 _RADER_BIENCODER_SCORES_KWARGS = {
     "chunk_to_context": True,
     "context_length": 2048,
+    "query_prompt": "query: ",
+    "document_prompt": "document: ",
+    "query_suffix": RADER_EXPECTED_EOS,
+    "document_suffix": RADER_EXPECTED_EOS,
 }
+# ReasonIR gets no text envelope: its own encode() adds nothing when the
+# instruction is empty. The instructed arms go through per-side encode
+# kwargs instead - see _experiment_scores_kwargs.
 CUSTOM_MODEL_SCORES_KWARGS = {
     "rader-3b": dict(_RADER_BIENCODER_SCORES_KWARGS),
     "rader-7b": dict(_RADER_BIENCODER_SCORES_KWARGS),
@@ -476,10 +572,26 @@ TABLE_MODELS = {
         "model": "tencent/KaLM-Embedding-Gemma3-12B-2511",
         "use_vllm": True,
     },
-    "embeddinggemma-300m": {"model": "google/embeddinggemma-300m", "use_vllm": True},
+    # EmbeddingGemma is a prompt-template-trained model: its documented
+    # grammar is a fixed closed set, not free text.
+    "embeddinggemma-300m": {
+        "model": "google/embeddinggemma-300m",
+        "use_vllm": True,
+        "scores_kwargs": {
+            "query_prompt": "task: search result | query: ",
+            "document_prompt": "title: none | text: ",
+        },
+    },
+    # jina-v5 ships prompts {"query": "Query: ", "document": "Document: "}
+    # with default_prompt_name="document" - so the prompt-less ST path used
+    # to prepend "Document: " to QUERIES as well as documents.
     "jina-embeddings-v5-text-small": {
         "model": "jinaai/jina-embeddings-v5-text-small",
         "use_vllm": True,
+        "scores_kwargs": {
+            "query_prompt": "Query: ",
+            "document_prompt": "Document: ",
+        },
     },
     "jina-embeddings-v5-text-nano": {
         "model": "jinaai/jina-embeddings-v5-text-nano",
@@ -489,6 +601,11 @@ TABLE_MODELS = {
             "device": "cuda",
             "model_kwargs": {"dtype": "bfloat16", "default_task": "retrieval"},
         },
+        "scores_kwargs": {
+            "query_prompt": "Query: ",
+            "document_prompt": "Document: ",
+        },
+        "disable_st_default_prompt": True,
     },
     "octen-embedding-4b": {"model": "Octen/Octen-Embedding-4B", "use_vllm": True},
     "octen-embedding-8b": {"model": "Octen/Octen-Embedding-8B", "use_vllm": True},
@@ -511,6 +628,13 @@ TABLE_MODELS = {
         },
         "scores_kwargs": dict(_CHUNK512_SCORES_KWARGS),
     },
+    # DELIBERATELY prompt-free, against the model card. E5 documents
+    # "query: " / "passage: " as required ("otherwise you will see a
+    # performance degradation"), but measured on this benchmark those
+    # prefixes COST 0.028-0.080 nDCG, consistently, at p0, p1 and p2, on both
+    # tasks that use problem+solution documents - and the effect is not a
+    # chunking artifact (see FINDINGS_2026-08-25.md). We report our own
+    # prompt-free configuration and disclose the deviation.
     "multilingual-e5-large": {
         "model": "intfloat/multilingual-e5-large",
         "use_vllm": True,
@@ -529,11 +653,48 @@ API_MODELS = {
     "text-embedding-3-large": ("openrouter", "text-embedding-3-large"),
 }
 
+# Gemini's retrieval mechanism is the task_type enum, not a text prefix; it
+# reaches embed_content(config=EmbedContentConfig(task_type=...)) through
+# EmbeddingProcessor's per-side encode kwargs.
+#
+# gemini-embedding-001 ONLY. Live-probed 2026-08-25 against the real API:
+# on -001, RETRIEVAL_QUERY returns byte-identical vectors to sending no
+# config at all (it is the server-side default) while RETRIEVAL_DOCUMENT
+# differs substantially (cosine 0.83-0.88 against the query-mode vector on
+# benchmark-like text), so the parameter is live and only the DOCUMENT side
+# actually changes. On gemini-embedding-2 every task_type - all eight valid
+# values - returns a byte-identical vector, while an invalid value still
+# 400s: the parameter is accepted and validated but has no effect on the
+# embedding. Sending it there would buy nothing and would split one embed
+# call into two (see EmbeddingProcessor._get_scores_per_side), so -2 is
+# deliberately left with no envelope. Re-probe with
+# scripts/instructions/diagnose_protocol.py gemini before assuming this is
+# still true. text-embedding-3-* have no mechanism of any kind.
+API_MODEL_SCORES_KWARGS = {
+    "gemini-embedding-001": {
+        "query_encode_kwargs": {"task_type": "RETRIEVAL_QUERY"},
+        "document_encode_kwargs": {"task_type": "RETRIEVAL_DOCUMENT"},
+    },
+}
+
+# The "-no-tok" keys are each method in its OWN default tokenization, with no
+# mathematics-aware preprocessing: BM25 and Jaccard fall back to
+# whitespace-delimited tokens, TF-IDF to scikit-learn's regex word tokenizer
+# plus its own lowercasing. The plain keys use Approach Zero's pya0 tokenizer
+# on every LaTeX block (see tokenization_helper.math_word_tokens).
+#
+# Both are reported: the paper's Table 1 lexical rows are the math-aware ones,
+# and Table 3 carries the "-no-tok" rows beside them. The math tokenizer is
+# NOT uniformly better - it gains BM25 (+0.018) and Jaccard (+0.009) but costs
+# TF-IDF (-0.018) - which is exactly why both belong in the paper.
 LEXICAL_MODEL_BUILDERS = {
     "bm25": BM25Processor,
     "tf-idf": TfidfProcessor,
     "jaccard": JaccardProcessor,
     "approach0": Approach0Processor,
+    "bm25-no-tok": lambda: BM25Processor(tokenize_approach0=False),
+    "tf-idf-no-tok": lambda: TfidfProcessor(tokenize_approach0=False),
+    "jaccard-no-tok": lambda: JaccardProcessor(tokenize_approach0=False),
 }
 
 QWEN3_RERANKER_REPOS = {
@@ -547,10 +708,16 @@ COLBERT_REPOS = {
     "reason-moderncolbert": "lightonai/Reason-ModernColBERT",
 }
 
-INSTRUCTED_COLBERT_QUERY_LENGTH = 256
-INSTRUCTED_GROUPRANK_SCAFFOLD_RESERVE = 1280
 
 INSTRUCTION_EXCLUDED = {
+    "tf-idf-no-tok": (
+        "same reason as tf-idf: a document-fitted vocabulary plus cosine "
+        "dilution makes instruction words pure noise"
+    ),
+    "jaccard-no-tok": (
+        "same reason as jaccard: instruction tokens inflate the query "
+        "token-set union"
+    ),
     "tf-idf": (
         "its vocabulary is fitted on documents only and cosine scoring "
         "dilutes real query terms, so instruction words act as pure noise"
@@ -571,6 +738,54 @@ EXPERIMENT_MODEL_KEYS = (
     + list(API_MODELS)
     + list(LEXICAL_MODEL_BUILDERS)
 )
+
+
+@contextlib.contextmanager
+def _result_lock(filepath: Path):
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = filepath.with_name(filepath.name + ".lock")
+    with open(lock_path, "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _write_result(
+    filepath: Path,
+    model_key: str,
+    new_output: dict,
+    extra_report_fields: dict | None = None,
+) -> dict:
+    with _result_lock(filepath):
+        merged = _merge_results(filepath, model_key, new_output)
+        if extra_report_fields:
+            merged["reports"][model_key].update(extra_report_fields)
+        tmp = filepath.with_name(filepath.name + ".tmp")
+        tmp.write_text(json.dumps(merged, indent=2))
+        tmp.replace(filepath)
+    return merged
+
+
+def _write_meta(meta_path: Path, meta: dict) -> None:
+    with _result_lock(meta_path):
+        existing = {}
+        if meta_path.exists():
+            try:
+                existing = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+        merged = dict(existing)
+        merged.update(meta)
+        seen_tasks = list(existing.get("tasks", []))
+        for task in meta.get("tasks", []):
+            if task not in seen_tasks:
+                seen_tasks.append(task)
+        merged["tasks"] = seen_tasks
+        tmp = meta_path.with_name(meta_path.name + ".tmp")
+        tmp.write_text(json.dumps(merged, indent=2))
+        tmp.replace(meta_path)
 
 
 def _merge_results(filepath: Path, model_key: str, new_output: dict) -> dict:
@@ -616,7 +831,14 @@ def _merge_results(filepath: Path, model_key: str, new_output: dict) -> dict:
             existing_report[key] = new_report[key]
 
     domains = new_output.get("domains") or existing.get("domains")
-    return {"domains": domains, "reports": {model_key: existing_report}}
+    merged = {"domains": domains, "reports": {model_key: existing_report}}
+    for key in ("query_row_idxs", "part"):
+        value = new_output.get(key)
+        if value is None:
+            value = existing.get(key)
+        if value is not None:
+            merged[key] = value
+    return merged
 
 
 def _partial_report_from_checkpoints(
@@ -691,14 +913,61 @@ def _sync_back_if_needed(save_dir: str) -> None:
     host = os.environ.get("SABERMATH_CANONICAL_HOST", "hala")
     path = os.environ.get("SABERMATH_CANONICAL_PATH", "/home/ivo_petrov/sabermath")
     try:
-        subprocess.run(
-            ["rsync", "-auz", f"{save_dir}/", f"{host}:{path}/{save_dir}/"],
-            check=True,
+        # rsync exit 23/24 mean "some source files vanished or could not be
+        # read" - guaranteed here, because this very loop renames *.json.tmp
+        # into place while the transfer runs. Everything else did transfer, so
+        # those are successes; check=True would turn every one of them into a
+        # spurious failure message and hide the real ones.
+        completed = subprocess.run(
+            [
+                "rsync",
+                "-auz",
+                "--exclude=*.tmp",
+                "--exclude=.*.??????",
+                f"{save_dir}/",
+                f"{host}:{path}/{save_dir}/",
+            ],
             capture_output=True,
-            timeout=120,
+            timeout=300,
         )
+        if completed.returncode not in (0, 23, 24):
+            raise RuntimeError(
+                f"rsync exit {completed.returncode}: "
+                f"{completed.stderr.decode(errors='replace')[-400:]}"
+            )
     except Exception as e:
         print(f"[!!] Periodic sync-back to {host} failed (will retry next time): {e}")
+
+
+def _subset_key(
+    n: int | None, seed: int, query_shard: int | None, query_shards: int | None
+) -> str:
+    parts = []
+    if n is not None:
+        parts.append(f"n{n}_seed{seed}")
+    if query_shards:
+        parts.append(f"shard{query_shard}of{query_shards}")
+    return "__".join(parts) if parts else "full"
+
+
+def _select_shard(queries, domains, query_row_idxs, query_shard, query_shards):
+    """Strided (i % shards == shard) query split, so every shard sees a mix
+    of domains and difficulties rather than one contiguous block. Each shard
+    writes its own result file and its own checkpoint dir - nothing is shared
+    between shards, so they are safe to run concurrently on separate nodes or
+    even separate clusters. scripts/merge_parts.py stitches them back into
+    one result file."""
+    idxs = [i for i in range(len(queries)) if i % query_shards == query_shard]
+    if not idxs:
+        raise ValueError(
+            f"Shard {query_shard}/{query_shards} selected no queries."
+        )
+    global_idxs = (
+        [query_row_idxs[i] for i in idxs]
+        if query_row_idxs is not None
+        else list(idxs)
+    )
+    return queries.select(idxs), [domains[i] for i in idxs], global_idxs
 
 
 def _run_one(
@@ -709,6 +978,7 @@ def _run_one(
     seed: int,
     tensor_parallel_size: int,
     progress_every: int,
+    legacy: bool = False,
 ) -> None:
     # Keyed by (model, query-subset) so a checkpoint - or a saved result -
     # from one --n/--seed combination is never mistaken for another subset:
@@ -716,9 +986,16 @@ def _run_one(
     # 20-query smoke test must never land in the same file as a full run.
     subset_key = f"n{n}_seed{seed}" if n is not None else "full"
     suffix = "" if subset_key == "full" else f"__{subset_key}"
+    if legacy:
+        suffix = f"{suffix}__legacy"
     filepath = Path(save_dir) / f"{model_key}{suffix}.json"
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir = Path(save_dir) / ".checkpoints" / model_key / subset_key
+    checkpoint_dir = (
+        Path(save_dir)
+        / ".checkpoints"
+        / model_key
+        / (f"{subset_key}__legacy" if legacy else subset_key)
+    )
 
     if (
         tensor_parallel_size > 1
@@ -767,8 +1044,7 @@ def _run_one(
             partial = _partial_report_from_checkpoints(
                 model_key, checkpoint_dir, tasks, domains
             )
-            merged = _merge_results(filepath, model_key, partial)
-            filepath.write_text(json.dumps(merged, indent=2))
+            _write_result(filepath, model_key, partial)
             _sync_back_if_needed(save_dir)
 
         if model_key in CUSTOM_MODEL_BUILDERS:
@@ -781,7 +1057,7 @@ def _run_one(
                 return_ndcgs=True,
                 checkpoint_dir=checkpoint_dir,
                 on_progress=on_progress,
-                scores_kwargs=CUSTOM_MODEL_SCORES_KWARGS.get(model_key, {}),
+                scores_kwargs=_model_scores_kwargs(model_key, legacy=legacy),
             )
         else:
             spec = dict(GENERIC_MODELS[model_key])
@@ -797,7 +1073,9 @@ def _run_one(
             # e.g. rader-14b's chunk_to_context/context_length/batch_size, to
             # cap peak activation memory per encode() call (see the note on
             # its GENERIC_MODELS entry above).
-            scores_kwargs = dict(spec.pop("scores_kwargs", {}))
+            spec.pop("scores_kwargs", None)
+            spec.pop("disable_st_default_prompt", None)
+            scores_kwargs = _model_scores_kwargs(model_key, legacy=legacy)
             report, ndcgs = evaluate(
                 model_name,
                 tasks=tasks,
@@ -837,8 +1115,7 @@ def _run_one(
         print(f"\n[!!] {model_key} failed:")
         print(tb)
 
-    output = _merge_results(filepath, model_key, output)
-    filepath.write_text(json.dumps(output, indent=2))
+    _write_result(filepath, model_key, output)
     print(f"[+] Wrote {filepath}")
     _sync_back_if_needed(save_dir)
 
@@ -860,19 +1137,60 @@ def _experiment_spec(model_key: str) -> dict | None:
     return None
 
 
-def _experiment_scores_kwargs(model_key: str) -> dict:
+def _model_scores_kwargs(model_key: str, legacy: bool = False) -> dict:
+    """Every per-model get_scores kwarg: preprocessing protocol
+    (chunk_to_context/context_length) plus the vendor input envelope
+    (query_prompt/document_prompt/suffixes/per-side API params). --legacy
+    drops the envelope only, so the pre-2026-08-25 prompt-free runs stay
+    reproducible from the same code."""
     if model_key in CUSTOM_MODEL_SCORES_KWARGS:
-        return dict(CUSTOM_MODEL_SCORES_KWARGS[model_key])
-    spec = _experiment_spec(model_key)
-    if spec is not None:
-        return dict(spec.get("scores_kwargs", {}))
-    return {}
+        kwargs = dict(CUSTOM_MODEL_SCORES_KWARGS[model_key])
+    elif model_key in API_MODEL_SCORES_KWARGS:
+        kwargs = dict(API_MODEL_SCORES_KWARGS[model_key])
+    else:
+        spec = _experiment_spec(model_key)
+        kwargs = dict(spec.get("scores_kwargs", {})) if spec is not None else {}
+    if legacy:
+        kwargs = {k: v for k, v in kwargs.items() if k not in AFFIX_KEYS}
+    return kwargs
 
 
-def _experiment_processor_slot(model_key: str, instruction_key: str) -> str:
+def _experiment_scores_kwargs(
+    model_key: str,
+    instruction: str | None = None,
+    legacy: bool = False,
+) -> tuple[dict, bool]:
+    """(scores_kwargs, wrap_instruction). wrap_instruction is False when the
+    model's own envelope already carries the instruction, so the generic
+    Instruct:/Query: wrap must not be applied on top of it (ReasonIR)."""
+    kwargs = _model_scores_kwargs(model_key, legacy=legacy)
+    wrap_instruction = True
+
+    if not legacy and model_key == "reasonir-8b" and instruction is not None:
+        # The official mechanism, exactly: prepend
+        # "<|user|>\n{task}\n<|embed|>\n" to the query and then exclude
+        # precisely those tokens from the mean pool. ReasonIRProcessor.encode
+        # takes that whole prefix as its `instruction` argument and does the
+        # masking itself, so it goes through the per-side encode kwargs
+        # rather than as a text affix - and the generic Instruct:/Query: wrap
+        # must not be applied on top of it.
+        wrap_instruction = False
+        kwargs["query_encode_kwargs"] = {
+            "instruction": REASONIR_QUERY_INSTRUCTION_SLOT.format(
+                instruction=instruction
+            )
+        }
+        kwargs["document_encode_kwargs"] = {"instruction": ""}
+
+    return kwargs, wrap_instruction
+
+
+def _experiment_processor_slot(
+    model_key: str, instruction_key: str, legacy: bool = False
+) -> str:
     if model_key in QWEN3_RERANKER_REPOS:
         return f"qwen3__{instruction_key}"
-    if instruction_key != "p0" and (
+    if legacy and instruction_key != "p0" and (
         model_key == "diver-grouprank-32b" or model_key in COLBERT_REPOS
     ):
         return "instructed"
@@ -880,14 +1198,28 @@ def _experiment_processor_slot(model_key: str, instruction_key: str) -> str:
 
 
 def _build_spec_processor(
-    spec: dict, model_key: str, tensor_parallel_size: int
+    spec: dict, model_key: str, tensor_parallel_size: int, legacy: bool = False
 ):
     spec = dict(spec)
     model_name = spec.pop("model")
     init_kwargs = dict(spec.pop("init_kwargs", {}))
     use_vllm = spec.pop("use_vllm", False)
+    disable_st_default_prompt = spec.pop("disable_st_default_prompt", False)
     if not use_vllm:
-        return STProcessor.from_huggingface(model_name, **init_kwargs)
+        processor = STProcessor.from_huggingface(model_name, **init_kwargs)
+        if disable_st_default_prompt and not legacy:
+            # This model's prompts are applied explicitly per side via
+            # scores_kwargs; leaving default_prompt_name set would make
+            # sentence-transformers prepend its own default on top.
+            st = getattr(processor, "_model", None)
+            current = getattr(st, "default_prompt_name", None)
+            if current is not None:
+                print(
+                    f"[~] {model_key}: clearing sentence-transformers "
+                    f"default_prompt_name={current!r} (prompts applied per side)"
+                )
+                st.default_prompt_name = None
+        return processor
     if model_key in GENERIC_MODELS_USE_TP and tensor_parallel_size > 1:
         init_kwargs["tensor_parallel_size"] = tensor_parallel_size
     return VLLMProcessor.from_huggingface(model_name, **init_kwargs)
@@ -898,21 +1230,43 @@ def _build_experiment_processor(
     instruction_key: str,
     tensor_parallel_size: int,
     save_dir: str,
+    legacy: bool = False,
 ):
     instruction = INSTRUCTIONS[instruction_key]
-    if model_key in QWEN3_RERANKER_REPOS and instruction is not None:
+    if model_key in QWEN3_RERANKER_REPOS:
+        # This family has a genuine <Instruct> slot, so p0 must fill it with
+        # the VENDOR default to be a real "no task instruction" baseline; the
+        # repo's production math instruction lives on as prompt key "pm".
+        task_instruction = instruction
+        if task_instruction is None:
+            if legacy:
+                return Qwen3RerankerVLLMProcessor(QWEN3_RERANKER_REPOS[model_key])
+            task_instruction = VENDOR_QWEN3_RERANKER_INSTRUCTION
         return Qwen3RerankerVLLMProcessor(
-            QWEN3_RERANKER_REPOS[model_key], task_instruction=instruction
+            QWEN3_RERANKER_REPOS[model_key], task_instruction=task_instruction
         )
-    if model_key == "diver-grouprank-32b" and instruction is not None:
+    if model_key == "diver-grouprank-32b":
+        # The scaffold reserve has to be identical in every arm, or p0 and
+        # p1-p3 differ in per-document token budget as well as in prompt.
+        if legacy and instruction is None:
+            return GroupRankProcessor(
+                tensor_parallel_size=max(1, tensor_parallel_size)
+            )
         return GroupRankProcessor(
             tensor_parallel_size=max(1, tensor_parallel_size),
-            scaffold_reserve_tokens=INSTRUCTED_GROUPRANK_SCAFFOLD_RESERVE,
+            scaffold_reserve_tokens=EXPERIMENT_GROUPRANK_SCAFFOLD_RESERVE,
         )
-    if model_key in COLBERT_REPOS and instruction is not None:
+    if model_key in COLBERT_REPOS:
+        # Same reasoning as diver-grouprank: ColBERT pads queries to
+        # query_length with mask tokens (query augmentation), so an arm-only
+        # query_length changes the query representation even for identical
+        # text. Uniform across arms; the checkpoint defaults (48 / 128) are
+        # kept only under --legacy.
+        if legacy and instruction is None:
+            return ColBERTProcessor(COLBERT_REPOS[model_key])
         return ColBERTProcessor(
             COLBERT_REPOS[model_key],
-            query_length=INSTRUCTED_COLBERT_QUERY_LENGTH,
+            query_length=EXPERIMENT_COLBERT_QUERY_LENGTH,
         )
     if model_key == "inf-x-retriever":
         return INFXRetrieverProcessor(
@@ -924,7 +1278,9 @@ def _build_experiment_processor(
         return CUSTOM_MODEL_BUILDERS[model_key](tensor_parallel_size)
     spec = _experiment_spec(model_key)
     if spec is not None:
-        return _build_spec_processor(spec, model_key, tensor_parallel_size)
+        return _build_spec_processor(
+            spec, model_key, tensor_parallel_size, legacy=legacy
+        )
     if model_key in API_MODELS:
         kind, model_name = API_MODELS[model_key]
         if kind == "google":
@@ -937,6 +1293,30 @@ def _build_experiment_processor(
     raise KeyError(f"Unknown experiment model key: {model_key}")
 
 
+def _assert_envelope_supported(model_key: str, processor, scores_kwargs: dict) -> None:
+    """The vendor input envelope is applied by EmbeddingProcessor.get_scores.
+    Every processor that gets one below is a bi-encoder, but a future spec
+    edit could point one at a cross-encoder whose get_scores(**kwargs) would
+    silently swallow it - fail loudly instead."""
+    envelope = [k for k in scores_kwargs if k in AFFIX_KEYS]
+    if envelope and not isinstance(processor, EmbeddingProcessor):
+        raise TypeError(
+            f"{model_key}: input-envelope kwargs {envelope} are only applied "
+            f"by EmbeddingProcessor.get_scores, but this model's processor is "
+            f"{type(processor).__name__}."
+        )
+
+
+def _protocol_tag(legacy: bool, instruction_template: str) -> str:
+    parts = []
+    if legacy:
+        parts.append("legacy")
+    default_template = "legacy" if legacy else "canonical"
+    if instruction_template != default_template:
+        parts.append("nl2" if instruction_template == "legacy" else "nl1")
+    return "-".join(parts)
+
+
 def _run_one_experiment(
     model_key: str,
     save_dir: str,
@@ -947,9 +1327,17 @@ def _run_one_experiment(
     progress_every: int,
     instruction_keys: list[str],
     save_scores: bool,
+    legacy: bool = False,
+    instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE,
+    part_name: str | None = None,
+    query_shard: int | None = None,
+    query_shards: int | None = None,
 ) -> None:
-    subset_key = f"n{n}_seed{seed}" if n is not None else "full"
+    subset_key = _subset_key(n, seed, query_shard, query_shards)
     suffix = "" if subset_key == "full" else f"__{subset_key}"
+    tag = _protocol_tag(legacy, instruction_template)
+    tag_suffix = f"__{tag}" if tag else ""
+    part_suffix = f"__part-{part_name}" if part_name else ""
 
     queries, documents = load_data()
     domains = list(queries["domains"])
@@ -963,41 +1351,80 @@ def _run_one_experiment(
         queries = queries.select(query_row_idxs)
         domains = [domains[i] for i in query_row_idxs]
 
+    if query_shards:
+        queries, domains, query_row_idxs = _select_shard(
+            queries, domains, query_row_idxs, query_shard, query_shards
+        )
+        print(
+            f"[~] Query shard {query_shard}/{query_shards}: "
+            f"{len(queries)} queries."
+        )
+
+    instruction_placement = "column" if legacy else "query"
+
     processors: dict[str, object] = {}
     task_scores_by_prompt: dict[str, dict[str, float]] = {}
     failures: list[str] = []
 
     for instruction_key in instruction_keys:
         instruction_text = INSTRUCTIONS[instruction_key]
-        query_instruction = (
-            None if model_key in QWEN3_RERANKER_REPOS else instruction_text
+        scores_kwargs, wrap_instruction = _experiment_scores_kwargs(
+            model_key, instruction_text, legacy=legacy
         )
+        query_instruction = instruction_text
+        if model_key in QWEN3_RERANKER_REPOS or not wrap_instruction:
+            query_instruction = None
 
-        filepath = Path(save_dir) / f"{model_key}__{instruction_key}{suffix}.json"
+        prompt_block = {
+            "key": instruction_key,
+            "text": instruction_text,
+            "query_instruction_applied": query_instruction is not None,
+            "protocol": "legacy" if legacy else "canonical",
+            "protocol_tag": tag,
+            "instruction_template": instruction_template,
+            "instruction_placement": instruction_placement,
+            "mechanism": (
+                "control"
+                if model_key in INSTRUCTION_CONTROL_MODELS
+                else "vendor-instruction"
+            ),
+            "control_reason": INSTRUCTION_CONTROL_REASONS.get(model_key),
+            "input_envelope": {
+                k: v for k, v in scores_kwargs.items() if k in AFFIX_KEYS
+            },
+        }
+
+        filepath = (
+            Path(save_dir)
+            / f"{model_key}__{instruction_key}{tag_suffix}{suffix}{part_suffix}.json"
+        )
         filepath.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_dir = (
             Path(save_dir)
             / ".checkpoints"
             / model_key
-            / f"{instruction_key}__{subset_key}"
+            / f"{instruction_key}{tag_suffix}__{subset_key}{part_suffix}"
         )
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        (checkpoint_dir / "meta.json").write_text(
-            json.dumps(
-                {
-                    "model_key": model_key,
-                    "instruction_key": instruction_key,
-                    "instruction_text": instruction_text,
-                    "query_instruction_applied": query_instruction is not None,
-                    "n": n,
-                    "seed": seed,
-                    "query_row_idxs": query_row_idxs,
-                    "k": 10,
-                    "dcg_variant": "exponent",
-                    "tasks": tasks,
-                },
-                indent=2,
-            )
+        _write_meta(
+            checkpoint_dir / "meta.json",
+            {
+                "model_key": model_key,
+                "instruction_key": instruction_key,
+                "instruction_text": instruction_text,
+                "query_instruction_applied": query_instruction is not None,
+                "n": n,
+                "seed": seed,
+                "query_row_idxs": query_row_idxs,
+                "k": 10,
+                "dcg_variant": "exponent",
+                "tasks": tasks,
+                "protocol_tag": tag,
+                "part": part_name,
+                "query_shard": query_shard,
+                "query_shards": query_shards,
+                "prompt": prompt_block,
+            },
         )
 
         progress_counter = {"n": 0}
@@ -1013,19 +1440,28 @@ def _run_one_experiment(
             partial = _partial_report_from_checkpoints(
                 model_key, _checkpoint_dir, tasks, domains
             )
-            merged = _merge_results(_filepath, model_key, partial)
-            _filepath.write_text(json.dumps(merged, indent=2))
+            partial["query_row_idxs"] = query_row_idxs
+            partial["part"] = part_name
+            _write_result(_filepath, model_key, partial)
             _sync_back_if_needed(save_dir)
 
         print(f"\n[~] {model_key} / {instruction_key} ...")
 
         try:
-            slot = _experiment_processor_slot(model_key, instruction_key)
+            slot = _experiment_processor_slot(
+                model_key, instruction_key, legacy=legacy
+            )
             if slot not in processors:
                 processors[slot] = _build_experiment_processor(
-                    model_key, instruction_key, tensor_parallel_size, save_dir
+                    model_key,
+                    instruction_key,
+                    tensor_parallel_size,
+                    save_dir,
+                    legacy=legacy,
                 )
             model = processors[slot]
+
+            _assert_envelope_supported(model_key, model, scores_kwargs)
 
             report, ndcgs = evaluate(
                 model,
@@ -1036,13 +1472,20 @@ def _run_one_experiment(
                 checkpoint_dir=checkpoint_dir,
                 on_progress=on_progress,
                 instruction=query_instruction,
+                instruction_template=instruction_template,
+                instruction_placement=instruction_placement,
                 save_scores=save_scores,
-                scores_kwargs=_experiment_scores_kwargs(model_key),
+                scores_kwargs=scores_kwargs,
             )
 
             report_dict = report.to_dict()
             report_dict["ndcgs_by_task"] = ndcgs
-            output = {"domains": domains, "reports": {model_key: report_dict}}
+            output = {
+                "domains": domains,
+                "query_row_idxs": query_row_idxs,
+                "part": part_name,
+                "reports": {model_key: report_dict},
+            }
 
             task_scores_by_prompt[instruction_key] = {
                 t["task"]: t["ndcg_at_k"] for t in report_dict["tasks"]
@@ -1068,13 +1511,9 @@ def _run_one_experiment(
             print(f"\n[!!] {model_key} / {instruction_key} failed:")
             print(tb)
 
-        output = _merge_results(filepath, model_key, output)
-        output["reports"][model_key]["prompt"] = {
-            "key": instruction_key,
-            "text": instruction_text,
-            "query_instruction_applied": query_instruction is not None,
-        }
-        filepath.write_text(json.dumps(output, indent=2))
+        _write_result(
+            filepath, model_key, output, extra_report_fields={"prompt": prompt_block}
+        )
         print(f"[+] Wrote {filepath}")
         _sync_back_if_needed(save_dir)
 
@@ -1134,7 +1573,55 @@ def main() -> None:
         "--task",
         choices=ALL_TASKS,
         default=None,
-        help="Run only this task (default: all 3, in one process per model)",
+        help="Run only this task (default: all 3, in one process per model). "
+        "Combine with --part-name to run the three tasks as three concurrent "
+        "jobs without them racing on one result file.",
+    )
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Reproduce the pre-2026-08-25 protocol exactly: no vendor input "
+        "envelopes (query:/passage:, Query:/Document:, RaDeR EOS, ReasonIR "
+        "wrappers, Gemini task_type), Qwen3-Reranker p0 back on the repo's "
+        "own math instruction, ColBERT/GroupRank arm-dependent budgets, the "
+        "double-newline Instruct: template, and the instruction mapped into "
+        "the problem column before the task transform. Results are written "
+        "with a __legacy tag so they can never overwrite current-protocol "
+        "runs. See scripts/instructions/PROTOCOL.md.",
+    )
+    parser.add_argument(
+        "--instruction-template",
+        choices=list(INSTRUCTION_TEMPLATES),
+        default=None,
+        help="Instruct:/Query: wrapper (default: 'legacy' with --legacy, "
+        "'canonical' - the vendors' single newline - otherwise). Set "
+        "explicitly to isolate the template's effect from everything else.",
+    )
+    parser.add_argument(
+        "--part-name",
+        type=str,
+        default=None,
+        help="Write this run's results to <model>__<key>[...]__part-<NAME>.json "
+        "with its own checkpoint directory, instead of the shared result "
+        "file. Use it whenever several jobs cover different slices of the "
+        "same (model, prompt) cell - one job per --task, or one per query "
+        "shard - so nothing races or gets clobbered by the region rsync. "
+        "Merge with scripts/merge_parts.py.",
+    )
+    parser.add_argument(
+        "--query-shards",
+        type=int,
+        default=None,
+        help="Split the query set into this many strided shards (i %% shards) "
+        "so a slow model can be run as N concurrent jobs. Each shard keeps "
+        "its own result file and checkpoints; merge with "
+        "scripts/merge_parts.py.",
+    )
+    parser.add_argument(
+        "--query-shard",
+        type=int,
+        default=None,
+        help="Which shard index (0-based) this job evaluates.",
     )
     parser.add_argument("--save-to", type=str, default="results/rerankers")
     parser.add_argument(
@@ -1169,6 +1656,24 @@ def main() -> None:
 
     models = args.models or ALL_MODEL_KEYS
     tasks = [args.task] if args.task else ALL_TASKS
+
+    instruction_template = args.instruction_template or (
+        "legacy" if args.legacy else DEFAULT_INSTRUCTION_TEMPLATE
+    )
+
+    if (args.query_shards is None) != (args.query_shard is None):
+        parser.error("--query-shards and --query-shard must be used together.")
+    if args.query_shards is not None:
+        if args.query_shards < 2:
+            parser.error("--query-shards must be >= 2.")
+        if not 0 <= args.query_shard < args.query_shards:
+            parser.error(
+                f"--query-shard must be in [0, {args.query_shards - 1}]."
+            )
+        if args.instructions is None:
+            parser.error("--query-shards requires --instructions.")
+    if args.part_name is not None and args.instructions is None:
+        parser.error("--part-name requires --instructions.")
 
     instruction_keys = None
     if args.instructions is not None:
@@ -1209,6 +1714,14 @@ def main() -> None:
         print(
             f"# Running {model_key} ({i}/{len(models)}) | tasks={tasks}"
             + (f" | instructions={instruction_keys}" if instruction_keys else "")
+            + f" | protocol={'legacy' if args.legacy else 'canonical'}"
+            + f" | template={instruction_template}"
+            + (f" | part={args.part_name}" if args.part_name else "")
+            + (
+                f" | shard={args.query_shard}/{args.query_shards}"
+                if args.query_shards
+                else ""
+            )
         )
         print("#" * 60)
 
@@ -1223,6 +1736,7 @@ def main() -> None:
                     args.seed,
                     args.tensor_parallel_size,
                     args.progress_every,
+                    args.legacy,
                 ),
             )
         else:
@@ -1238,6 +1752,11 @@ def main() -> None:
                     args.progress_every,
                     instruction_keys,
                     args.save_scores,
+                    args.legacy,
+                    instruction_template,
+                    args.part_name,
+                    args.query_shard,
+                    args.query_shards,
                 ),
             )
         p.start()

@@ -153,6 +153,23 @@ def cache_path_for(model_label: str, cache_directory: str | Path) -> str:
     return str(Path(cache_directory) / f"{safe_name}.pk")
 
 
+def _load_st_without_default_prompt(name: str, init_kwargs: dict):
+    """SentenceTransformers applies default_prompt_name to every encode()
+    call that names no prompt, so a repo whose default is "document" (jina-v5)
+    silently prefixes QUERIES with "Document: " too. The benchmark applies the
+    vendor prompts explicitly per side via --encode-kwargs instead, so the
+    repo default has to be cleared or both would stack."""
+    from sabermath.processors import SentenceTransformersProcessor
+
+    processor = SentenceTransformersProcessor.from_huggingface(name, **init_kwargs)
+    st = processor._model
+    current = getattr(st, "default_prompt_name", None)
+    if current is not None:
+        print(f"[~] Clearing sentence-transformers default_prompt_name={current!r}")
+        st.default_prompt_name = None
+    return processor
+
+
 def _run_isolated(
     name: str,
     use_vllm: bool,
@@ -161,17 +178,27 @@ def _run_isolated(
     encode_kwargs: dict,
     dcg_variant: str,
     cache: str | None,
+    clear_st_default_prompt: bool = False,
 ):
     try:
         print(f'\n\n[!!]\n\n[~] Running model "{name}"...\n\n[!!]\n\n')
-        report = sabermath.evaluate(
-            name,
-            use_vllm=use_vllm,
-            cache_path=cache,
-            dcg_variant=dcg_variant,
-            scores_kwargs=encode_kwargs,
-            init_kwargs=init_kwargs,
-        )
+        if clear_st_default_prompt and not use_vllm:
+            report = sabermath.evaluate(
+                _load_st_without_default_prompt(name, init_kwargs),
+                cache_path=cache,
+                dcg_variant=dcg_variant,
+                scores_kwargs=encode_kwargs,
+                init_kwargs={},
+            )
+        else:
+            report = sabermath.evaluate(
+                name,
+                use_vllm=use_vllm,
+                cache_path=cache,
+                dcg_variant=dcg_variant,
+                scores_kwargs=encode_kwargs,
+                init_kwargs=init_kwargs,
+            )
         obj = report.to_dict()
     except Exception as e:
         print(f"\n\n[!!] Error: {e} [!!]\n\n")
@@ -306,6 +333,15 @@ def main() -> None:
         help="Additional arguments to pass to the model/processor initializer",
     )
 
+    parser.add_argument(
+        "--clear-st-default-prompt",
+        action="store_true",
+        help="Clear the checkpoint's sentence-transformers default_prompt_name "
+        "before encoding (--driver st only). Needed for repos that default to "
+        "a document prompt, so it is not stacked on top of the query/document "
+        "prompts passed via --encode-kwargs.",
+    )
+
     # Cache Parameters
     parser.add_argument(
         "--cache",
@@ -366,6 +402,7 @@ def main() -> None:
                     encode_kwargs,
                     args.dcg_variant,
                     cache_file,
+                    args.clear_st_default_prompt,
                 ),
             }
         else:
