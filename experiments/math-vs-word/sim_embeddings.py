@@ -1,16 +1,11 @@
 import os
 import json
-import numpy as np
 import tqdm
 from datasets import Dataset
 from statistics import mean
 
-from embed import get_top5_candidates, get_embeddings
-from load_models import get_model
-
-
-def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+from embed import get_top5_candidates
+from load_models import get_model, get_scores_kwargs
 
 
 def calc_embedding_sims(
@@ -24,10 +19,19 @@ def calc_embedding_sims(
 
     print(f"============== {model_id} ==============")
 
-    model_dict = get_model(model_id)
+    # get_model() returns an actual sabermath.processors instance
+    # (SentenceTransformersProcessor / VLLMProcessor / GoogleProcessor) -
+    # scored below via its own .get_scores(), the exact same call
+    # sabermath.benchmark.evaluate_task() makes in production.
+    processor = get_model(model_id)
 
-    model = model_dict["model"]
-    model_type = model_dict["type"]
+    # Empty for every model except the RaDeR bi-encoder family, which needs
+    # chunk_to_context/context_length forwarded to get_scores() to match
+    # scripts/run_rerankers.py's own protocol (see load_models.py's
+    # get_scores_kwargs docstring).
+    scores_kwargs = get_scores_kwargs(model_id)
+    if scores_kwargs:
+        print(f"[~] Extra get_scores() kwargs for {model_id}: {scores_kwargs}")
 
     similarities_dict = {}
 
@@ -56,28 +60,37 @@ def calc_embedding_sims(
             for s in top5_cand_idxs
         ]
 
-        to_embed = [
-            target_problem_full,
-            target_problem_math,
-            target_problem_text,
-        ] + candidates_compare
-
-        problem_full, problem_math, problem_text, c1, c2, c3, c4, c5 = get_embeddings(
-            model_name=model_id,
-            model=model,
-            type=model_type,
-            texts=to_embed,
-            batch_size=10,
-        )
-
+        # Same call shape as sabermath.benchmark.evaluate_task():
+        # processor.get_scores(query, documents, show_progress_bar=False) -
+        # one call per query variant, all three against the same 5
+        # candidates. get_scores()'s own default caching (check_cache=
+        # update_cache=True) means the 5 candidate embeddings are computed
+        # once (on the first of the three calls below) and reused for the
+        # other two, same as it would be reused across repeated targets that
+        # happen to share a candidate.
         pr_full_vs_candidates = mean(
-            [cosine_similarity(problem_full, c) for c in [c1, c2, c3, c4, c5]]
+            processor.get_scores(
+                target_problem_full,
+                candidates_compare,
+                show_progress_bar=False,
+                **scores_kwargs,
+            )
         )
         pr_math_vs_candidates = mean(
-            [cosine_similarity(problem_math, c) for c in [c1, c2, c3, c4, c5]]
+            processor.get_scores(
+                target_problem_math,
+                candidates_compare,
+                show_progress_bar=False,
+                **scores_kwargs,
+            )
         )
         pr_text_vs_candidates = mean(
-            [cosine_similarity(problem_text, c) for c in [c1, c2, c3, c4, c5]]
+            processor.get_scores(
+                target_problem_text,
+                candidates_compare,
+                show_progress_bar=False,
+                **scores_kwargs,
+            )
         )
 
         similarities_dict[target_id] = {
