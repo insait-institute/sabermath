@@ -9,7 +9,10 @@ from tqdm import tqdm
 from datasets import Dataset
 
 from sabermath.data import load_data
-from sabermath.instructions import format_instructed_query
+from sabermath.instructions import (
+    DEFAULT_INSTRUCTION_TEMPLATE,
+    format_instructed_query,
+)
 from sabermath.metrics import compute_ndcg_at_k
 from sabermath.schemas import (
     Task,
@@ -149,6 +152,8 @@ class TaskSettings:
     dcg_variant: Literal["linear", "exponent"] | None
     show_progress_bar: bool
     scores_kwargs: dict
+    query_instruction: str | None = None
+    instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE
 
 
 def evaluate_task(
@@ -189,6 +194,14 @@ def evaluate_task(
     document_version = "statement" if name == "statement-statement" else "full"
 
     queries = transform(queries_ds, query_version)
+
+    if settings.query_instruction is not None:
+        queries = [
+            format_instructed_query(
+                settings.query_instruction, q, settings.instruction_template
+            )
+            for q in queries
+        ]
 
     all_ndcgs_by_idx: dict[int, float | None] = _load_checkpoint(checkpoint_path)
     ndcg_by_query_idx: dict[int, float] = {
@@ -360,6 +373,8 @@ def evaluate(
     checkpoint_dir: str | Path | None = None,
     on_progress: Callable[[], None] | None = None,
     instruction: str | None = None,
+    instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE,
+    instruction_placement: Literal["query", "column"] = "query",
     save_scores: bool = False,
     # Printing Config
     verbose: bool = True,
@@ -436,18 +451,33 @@ def evaluate(
         except Exception as e:
             vprint(f"[-] Failed to load cache: {e}")
 
+    if instruction_placement not in ("column", "query"):
+        raise ValueError(
+            f"Invalid instruction_placement: {instruction_placement}"
+        )
+
+    query_instruction = None
+
     if instruction is not None:
         if load_cache:
             vprint(
                 "[~] Warning: instructed queries are new cache keys - a "
                 "preloaded vector cache only serves the document side."
             )
-        vprint(f"[~] Setting instruction: {instruction}")
-        queries = queries.map(
-            lambda row: {
-                "problem": format_instructed_query(instruction, row["problem"])
-            }
+        vprint(
+            f"[~] Setting instruction ({instruction_placement} placement, "
+            f"{instruction_template} template): {instruction}"
         )
+        if instruction_placement == "column":
+            queries = queries.map(
+                lambda row: {
+                    "problem": format_instructed_query(
+                        instruction, row["problem"], instruction_template
+                    )
+                }
+            )
+        else:
+            query_instruction = instruction
         vprint("[+] Instruction set.")
 
     settings = TaskSettings(
@@ -458,6 +488,8 @@ def evaluate(
         dcg_variant=dcg_variant,
         show_progress_bar=show_progress_bars,
         scores_kwargs=scores_kwargs,
+        query_instruction=query_instruction,
+        instruction_template=instruction_template,
     )
 
     ndcgs = {}

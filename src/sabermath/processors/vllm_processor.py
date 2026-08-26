@@ -122,8 +122,15 @@ def _chunk_texts(texts, tokenizer, max_len):
         raise ValueError(f"Context length {max_len} too small for special tokens.")
 
     def _decode(ids):
+        # skip_special_tokens=False, deliberately. The encode above passes
+        # add_special_tokens=False, so nothing here was added by us - the only
+        # special tokens present are ones the CALLER put in the text, and a
+        # caller that asks for them means them. Dropping them silently deleted
+        # the RaDeR bi-encoders' "<|im_end|>" suffix from every text (verified
+        # 2026-08-25: even a short single-chunk document came back without it),
+        # which for a LAST-token pooler is exactly the position being pooled.
         return tokenizer.decode(
-            ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            ids, skip_special_tokens=False, clean_up_tokenization_spaces=False
         )
 
     def _fit(part):
@@ -161,16 +168,17 @@ def _truncate_text(text, tokenizer, max_len):
     ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
     if len(ids) <= budget:
         return text
+    # skip_special_tokens=False for the same reason as in _chunk_texts.
     for _ in range(5):
         text = tokenizer.decode(
-            ids[:budget], skip_special_tokens=True, clean_up_tokenization_spaces=False
+            ids[:budget], skip_special_tokens=False, clean_up_tokenization_spaces=False
         )
         ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
         if len(ids) <= budget:
             return text
     return tokenizer.decode(
         ids[: max(1, 2 * budget - len(ids))],
-        skip_special_tokens=True,
+        skip_special_tokens=False,
         clean_up_tokenization_spaces=False,
     )
 

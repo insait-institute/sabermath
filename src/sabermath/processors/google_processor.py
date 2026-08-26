@@ -70,14 +70,24 @@ class GoogleProcessor(EmbeddingProcessor):
     def _concat(self, batches: list[list[list[float]]]) -> list[list[float]]:
         return [item for batch in batches for item in batch]
 
+    def _embed_config(self, task_type: str | None):
+        if task_type is None:
+            return None
+        from google.genai import types
+
+        return types.EmbedContentConfig(task_type=task_type)
+
     async def _encode_batch(
         self,
         texts: list[str],
         sem: asyncio.Semaphore,
         *,
         retries: int = 9,
+        task_type: str | None = None,
     ) -> list[list[float]]:
         last_error: Exception | None = None
+        config = self._embed_config(task_type)
+        config_kwargs = {} if config is None else {"config": config}
 
         for attempt in range(retries):
             try:
@@ -85,6 +95,7 @@ class GoogleProcessor(EmbeddingProcessor):
                     response = await self._client.aio.models.embed_content(
                         model=self._model_name,
                         contents=texts,
+                        **config_kwargs,
                     )
 
                     if response.embeddings is None:
@@ -119,6 +130,7 @@ class GoogleProcessor(EmbeddingProcessor):
         retries: int = 9,
         batch_size: int = 100,
         max_concurrency: int | None = None,
+        task_type: str | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
         # max_concurrency=None means "use the default (20)". The distinction
@@ -140,7 +152,9 @@ class GoogleProcessor(EmbeddingProcessor):
         batches = list(self._split_to_batches(texts, batch_size))
 
         coros = [
-            self._encode_batch(batch, sem, retries=retries, **kwargs)
+            self._encode_batch(
+                batch, sem, retries=retries, task_type=task_type, **kwargs
+            )
             for batch in batches
         ]
 
@@ -161,6 +175,7 @@ class GoogleProcessor(EmbeddingProcessor):
         retries: int = 9,
         batch_size: int = 100,
         max_concurrency: int | None = None,
+        task_type: str | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
         try:
@@ -173,6 +188,7 @@ class GoogleProcessor(EmbeddingProcessor):
                     retries=retries,
                     batch_size=batch_size,
                     max_concurrency=max_concurrency,
+                    task_type=task_type,
                     **kwargs,
                 )
             )

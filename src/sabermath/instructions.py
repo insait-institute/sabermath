@@ -12,10 +12,32 @@ INSTRUCTIONS: dict[str, str | None] = {
         "entirely different variables, symbols, or natural language phrasing."
     ),
     "p3": "Find the most relevant document based on the query.",
+    "pm": (
+        "Given a math problem query, retrieve documents that are "
+        "mathematically relevant to the query"
+    ),
 }
 
 INSTRUCTION_KEYS = tuple(INSTRUCTIONS)
 
+INSTRUCTION_TEMPLATES: dict[str, str] = {
+    "canonical": "Instruct: {instruction}\nQuery: {query}",
+    "legacy": "Instruct: {instruction}\n\nQuery: {query}",
+}
 
-def format_instructed_query(instruction: str, problem: str) -> str:
-    return f"Instruct: {instruction}\n\nQuery: {problem}"
+DEFAULT_INSTRUCTION_TEMPLATE = "canonical"
+
+
+def format_instructed_query(
+    instruction: str,
+    problem: str,
+    template: str = DEFAULT_INSTRUCTION_TEMPLATE,
+) -> str:
+    try:
+        pattern = INSTRUCTION_TEMPLATES[template]
+    except KeyError:
+        raise ValueError(
+            f"Unknown instruction template '{template}' - valid: "
+            f"{', '.join(INSTRUCTION_TEMPLATES)}"
+        ) from None
+    return pattern.format(instruction=instruction, query=problem)
