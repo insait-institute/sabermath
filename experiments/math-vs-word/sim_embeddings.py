@@ -13,9 +13,15 @@ def calc_embedding_sims(
     good_targets: Dataset,
     good_candidates: Dataset,
     force_recalc: bool = False,
+    instruction_key: str | None = None,
 ):
 
     PATH_ID = model_id.replace("/", "_")
+    # An instructed arm writes its OWN file. The unsuffixed name stays the
+    # prompt-free run every published similarities/ file already holds, so
+    # adding an ablation can never overwrite it.
+    if instruction_key is not None:
+        PATH_ID = f"{PATH_ID}__{instruction_key}"
 
     print(f"============== {model_id} ==============")
 
@@ -29,9 +35,26 @@ def calc_embedding_sims(
     # chunk_to_context/context_length forwarded to get_scores() to match
     # scripts/run_rerankers.py's own protocol (see load_models.py's
     # get_scores_kwargs docstring).
-    scores_kwargs = get_scores_kwargs(model_id)
+    scores_kwargs = get_scores_kwargs(model_id, instruction_key)
     if scores_kwargs:
         print(f"[~] Extra get_scores() kwargs for {model_id}: {scores_kwargs}")
+
+    # The instruction is applied to the QUERY side only, through the same
+    # helper sabermath.benchmark.evaluate() uses, so an instructed math-vs-word
+    # query is byte-identical to an instructed main-benchmark query. All three
+    # target representations are wrapped: the comparison is between full,
+    # equation-only and word-only content of the SAME instructed query.
+    instruction_text = None
+    if instruction_key is not None:
+        from sabermath.instructions import INSTRUCTIONS, format_instructed_query
+
+        instruction_text = INSTRUCTIONS[instruction_key]
+        print(f"[~] Instruction {instruction_key}: {instruction_text!r}")
+
+    def as_query(text: str) -> str:
+        if instruction_text is None:
+            return text
+        return format_instructed_query(instruction_text, text)
 
     similarities_dict = {}
 
@@ -70,7 +93,7 @@ def calc_embedding_sims(
         # happen to share a candidate.
         pr_full_vs_candidates = mean(
             processor.get_scores(
-                target_problem_full,
+                as_query(target_problem_full),
                 candidates_compare,
                 show_progress_bar=False,
                 **scores_kwargs,
@@ -78,7 +101,7 @@ def calc_embedding_sims(
         )
         pr_math_vs_candidates = mean(
             processor.get_scores(
-                target_problem_math,
+                as_query(target_problem_math),
                 candidates_compare,
                 show_progress_bar=False,
                 **scores_kwargs,
@@ -86,7 +109,7 @@ def calc_embedding_sims(
         )
         pr_text_vs_candidates = mean(
             processor.get_scores(
-                target_problem_text,
+                as_query(target_problem_text),
                 candidates_compare,
                 show_progress_bar=False,
                 **scores_kwargs,

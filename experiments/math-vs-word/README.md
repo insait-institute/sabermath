@@ -73,6 +73,42 @@ Example:
 python calc_embedding_sims.py --method "Qwen/Qwen3-Embedding-8B" --config_file config.yaml
 ```
 
+### Instruction ablation (optional)
+
+By default `calc_sims.py` runs **prompt-free**: no task instruction, and no
+vendor input envelope. Every file in `similarities/` was produced that way.
+
+To run an instruction arm instead:
+
+```bash
+python calc_sims.py --config_file config.yaml --method <MODEL_ID> --instruction p1
+```
+
+This applies the same treatment `scripts/run_rerankers.py` gives the main
+instruction ablation — the model's full vendor input envelope **and** the
+instruction, wrapped onto the query with
+`sabermath.instructions.format_instructed_query`, so an instructed
+math-vs-word query is byte-identical to an instructed main-benchmark query.
+All three target representations (full, equation-only, word-only) are
+wrapped; the candidates are not.
+
+Output goes to `similarities/<method>__<arm>.json`, so an ablation can never
+overwrite the prompt-free file.
+
+Two things to be careful about:
+
+- **`p0` is not the prompt-free run.** `p0` means "no instruction text", but
+  it still applies the vendor envelope. For a model whose envelope is empty
+  the two are identical; for the seven that have one (EmbeddingGemma, both
+  Jina-v5, all three RaDeR, Gemini-Embedding-001) they are different runs.
+- **The lexical methods have no instruction arm.** `jaccard`, `tf-idf`,
+  `bm25` and `approach0` are the ablation's control rows and `--instruction`
+  is refused for them.
+
+`check_coverage.py --arms p0 p1 p2 p3 --emit-commands` reports which arms are
+missing and prints the exact command for each, including which `p0` arms can
+simply be copied from the prompt-free file.
+
 ---
 
 ## Supported model IDs

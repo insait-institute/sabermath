@@ -22,6 +22,16 @@ def main() -> None:
     parser.add_argument("--config_file")
     parser.add_argument("--method")
     parser.add_argument("--force_recalc", action="store_true")
+    parser.add_argument(
+        "--instruction",
+        default=None,
+        help="Instruction-ablation arm to run (p0/p1/p2/p3/pm). Omit for the "
+        "prompt-free run every published similarities/ file holds. An "
+        "instructed arm applies the model's full vendor input envelope AS "
+        "WELL as the instruction - the same treatment run_rerankers.py gives "
+        "the main ablation - and writes similarities/<method>__<arm>.json, "
+        "so it never overwrites the prompt-free file. Embedding methods only.",
+    )
     args = parser.parse_args()
 
     config_file_path = args.config_file
@@ -42,7 +52,20 @@ def main() -> None:
     if method in ALLOWED_MODELS:
         from sim_embeddings import calc_embedding_sims
 
-        calc_embedding_sims(method, good_targets, good_candidates, args.force_recalc)
+        calc_embedding_sims(
+            method,
+            good_targets,
+            good_candidates,
+            args.force_recalc,
+            instruction_key=args.instruction,
+        )
+    elif args.instruction is not None:
+        raise SystemExit(
+            f"--instruction is not supported for {method}: jaccard/tf-idf/"
+            "approach0/bm25 have no instruction mechanism. They are the "
+            "CONTROL rows of the main ablation for exactly this reason "
+            "(run_rerankers.INSTRUCTION_CONTROL_REASONS)."
+        )
 
     elif method == "jaccard":
         from sim_jaccard import calc_jaccard_sims

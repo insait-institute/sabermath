@@ -292,11 +292,98 @@ _SCORES_KWARGS = {
 }
 
 
-def get_scores_kwargs(model_id: str) -> dict:
-    """Extra kwargs sim_embeddings.py must forward to processor.get_scores()
-    for this specific model - empty for every model except the RaDeR
-    bi-encoder family (see _SCORES_KWARGS above)."""
-    return dict(_SCORES_KWARGS.get(model_id, {}))
+# HF repo string -> the short model key scripts/run_rerankers.py uses, built
+# by inverting that file's own spec dicts rather than hand-maintaining a
+# second roster here. Only needed for the instructed arms below: the
+# prompt-free default never has to reach run_rerankers' per-model envelopes.
+def _model_key_by_id() -> dict:
+    import run_rerankers as rr
+
+    mapping = {}
+    for spec_dict in (rr.GENERIC_MODELS, getattr(rr, "TABLE_MODELS", {})):
+        for key, spec in spec_dict.items():
+            if isinstance(spec, dict) and "model" in spec:
+                mapping[spec["model"]] = key
+    for key, repo in RADER_BIENCODER_MODELS.items():
+        mapping[repo] = key
+    for attr in ("QWEN3_RERANKER_REPOS", "COLBERT_REPOS"):
+        for key, repo in getattr(rr, attr, {}).items():
+            mapping[repo] = key
+    for key, value in getattr(rr, "API_MODELS", {}).items():
+        mapping.setdefault(value[1] if isinstance(value, tuple) else value, key)
+    return mapping
+
+
+def model_key_for(model_id: str) -> str:
+    """The run_rerankers model key for a math-vs-word method id.
+
+    Methods that ARE already a short key (the RERANK entries, which have no
+    single natural HF repo) map to themselves.
+    """
+    import run_rerankers as rr
+
+    if model_id in rr.EXPERIMENT_MODEL_KEYS:
+        return model_id
+    key = _model_key_by_id().get(model_id)
+    if key is None:
+        # Models built from CUSTOM_MODEL_BUILDERS/API_MODELS are keyed by a
+        # short name with no "model" field to invert, but that short name is
+        # the repo's last path component lowercased for every one of them
+        # (reasonir/ReasonIR-8B -> reasonir-8b, jhu-clsp/rank1-32b ->
+        # rank1-32b, google/gemini-embedding-001 -> gemini-embedding-001).
+        # Only accepted when the result is a real key, so a model genuinely
+        # outside the paper's table (microsoft/codebert-base) still raises
+        # rather than silently resolving to nothing.
+        candidate = model_id.rsplit("/", 1)[-1].lower()
+        if candidate in rr.EXPERIMENT_MODEL_KEYS:
+            return candidate
+    if key is None:
+        raise KeyError(
+            f"{model_id} has no scripts/run_rerankers.py model key, so its "
+            "input envelope and instruction handling are unknown. Add it to "
+            "that file's spec dicts rather than special-casing it here."
+        )
+    return key
+
+
+def get_scores_kwargs(model_id: str, instruction_key: str | None = None) -> dict:
+    """Extra kwargs sim_embeddings.py must forward to processor.get_scores().
+
+    instruction_key=None (the default, and what every existing similarities/
+    file was produced with) keeps this experiment PROMPT-FREE: the only
+    kwargs are chunk_to_context/context_length for the RaDeR bi-encoder
+    family (see _SCORES_KWARGS above). No vendor input envelope is applied.
+
+    Passing an instruction key instead switches the model to the SAME
+    canonical treatment scripts/run_rerankers.py uses for the instruction
+    ablation - the model's full vendor envelope (query/document prompts and
+    suffixes, API params) on top of the chunking. The instruction text
+    itself is not returned here; sim_embeddings.py wraps the query with it
+    via sabermath.instructions.format_instructed_query, exactly as
+    sabermath.benchmark.evaluate() does.
+
+    Note the consequence, because it is easy to miss: for a model with a
+    non-empty envelope the instructed p0 arm is NOT the same run as the
+    existing prompt-free file, and the two must not be compared directly.
+    For the ~32 methods whose envelope is empty they are identical.
+    """
+    kwargs = dict(_SCORES_KWARGS.get(model_id, {}))
+    if instruction_key is None:
+        return kwargs
+
+    import run_rerankers as rr
+    from sabermath.instructions import INSTRUCTIONS
+
+    if instruction_key not in INSTRUCTIONS:
+        raise ValueError(
+            f"Unknown instruction key {instruction_key!r} - valid: "
+            f"{sorted(INSTRUCTIONS)}"
+        )
+    envelope, _ = rr._experiment_scores_kwargs(
+        model_key_for(model_id), INSTRUCTIONS[instruction_key], legacy=False
+    )
+    kwargs.update(envelope)
+    return kwargs
 
 
 # Every entry below that also appears in scripts/run_rerankers.py's
