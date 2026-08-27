@@ -35,10 +35,13 @@ dependencies:
       # scripts/rerankers/envs/env_st_biencoders.yml documents (2026-08-19)
       # that 6.0.0's modules.Transformer silently wraps every input in the
       # tokenizer's chat template, so "lasttoken" pooling embeds the
-      # trailing template token instead of the last content token - exactly
-      # the pooling mode load_models.py's _build_octen_processor() relies
-      # on. 5.7.0 is the version that fix was verified against; matching it
-      # here rather than risking the same silent corruption.
+      # trailing template token instead of the last content token. The
+      # local Octen/Gemma3 builders that relied on that pooling mode are
+      # gone (those models are vLLM-backed now - see load_models.py's
+      # header), but the pin stays: env_inf_retriever.yml pins the same
+      # 5.7.0, and the models still on the SentenceTransformers path here
+      # (jina-v5-nano, inf-retriever-v1-pro) go through that same
+      # modules.Transformer.
       - sentence-transformers==5.7.0
       - rank_bm25
       # jina-embeddings-v5-text-nano's remote-code modeling file imports

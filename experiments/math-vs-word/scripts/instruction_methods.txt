@@ -1,0 +1,60 @@
+# Roster for the INSTRUCTION ABLATION (p1/p2/p3), generated 2026-08-26.
+#
+#   bash scripts/submit_force_recalc.sh --roster scripts/instruction_methods.txt \
+#     --instruction p1
+#
+# WHY THIS IS A SEPARATE, LONGER ROSTER than scripts/recalc_methods.txt:
+# that file lists only the methods whose DEFAULT-arm call changed, so it
+# deliberately omits the 10 models whose p0 call was verified identical.
+# An instructed arm is new work for EVERY model regardless - none of them
+# has a <method>__<arm>.json - so this covers all of ALLOWED_MODELS.
+#
+# The four lexical methods are absent on purpose: calc_sims.py refuses
+# --instruction for jaccard/tf-idf/bm25/approach0, which are the ablation's
+# CONTROL rows (run_rerankers.INSTRUCTION_CONTROL_REASONS).
+#
+#   method | env_yml | walltime | resource(gpu|cpu)
+
+Qwen/Qwen3-Embedding-8B|environment.yml|12:00:00|gpu
+Qwen/Qwen3-Embedding-4B|environment.yml|12:00:00|gpu
+Qwen/Qwen3-Embedding-0.6B|environment.yml|06:00:00|gpu
+BAAI/bge-m3|environment.yml|06:00:00|gpu
+tencent/KaLM-Embedding-Gemma3-12B-2511|environment.yml|1-0|gpu
+google/embeddinggemma-300m|environment.yml|06:00:00|gpu
+google-bert/bert-base-uncased|environment.yml|06:00:00|gpu
+FacebookAI/roberta-base|environment.yml|06:00:00|gpu
+microsoft/codebert-base|environment.yml|06:00:00|gpu
+google/gemini-embedding-001|environment.yml|1-0|cpu
+google/gemini-embedding-2|environment.yml|1-0|cpu
+microsoft/harrier-oss-v1-0.6b|environment.yml|06:00:00|gpu
+microsoft/harrier-oss-v1-270m|environment.yml|06:00:00|gpu
+microsoft/harrier-oss-v1-27b|environment.yml|1-0|gpu
+Octen/Octen-Embedding-4B|environment.yml|12:00:00|gpu
+Octen/Octen-Embedding-8B|environment.yml|12:00:00|gpu
+jinaai/jina-embeddings-v5-text-nano|environment.yml|06:00:00|gpu
+hanhainebula/reason-embed-qwen3-8b-0928|environment.yml|12:00:00|gpu
+AQ-MedAI/Diver-Retriever-4B|environment.yml|12:00:00|gpu
+AQ-MedAI/Diver-Retriever-0.6B|environment.yml|06:00:00|gpu
+infly/inf-retriever-v1-pro|environment_inf_retriever.yml|06:00:00|gpu
+reasonir/ReasonIR-8B|environment_reasonir.yml|12:00:00|gpu
+Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes|environment.yml|1-0|gpu
+Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes|environment.yml|12:00:00|gpu
+Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes|environment.yml|06:00:00|gpu
+nvidia/llama-embed-nemotron-8b|environment.yml|12:00:00|gpu
+intfloat/multilingual-e5-large|environment.yml|06:00:00|gpu
+jinaai/jina-embeddings-v5-text-small|environment.yml|06:00:00|gpu
+text-embedding-3-large|environment.yml|1-0|cpu
+text-embedding-3-small|environment.yml|1-0|cpu
+jhu-clsp/rank1-32b|environment.yml|1-0|gpu
+jhu-clsp/rank1-7b|environment.yml|12:00:00|gpu
+jhu-clsp/rank1-0.5b|environment.yml|06:00:00|gpu
+qwen3-reranker-8b|environment.yml|12:00:00|gpu
+qwen3-reranker-4b|environment.yml|12:00:00|gpu
+qwen3-reranker-0.6b|environment.yml|06:00:00|gpu
+splade-code-8b|environment_splade.yml|12:00:00|gpu
+splade-code-0.6b|environment_splade.yml|06:00:00|gpu
+rader-reranker-7b|environment.yml|12:00:00|gpu
+diver-grouprank-32b|environment.yml|1-0|gpu
+lightonai/GTE-ModernColBERT-v1|environment_colbert.yml|06:00:00|gpu
+lightonai/Reason-ModernColBERT|environment_colbert.yml|06:00:00|gpu
+inf-x-retriever|environment_inf_retriever.yml|1-0|gpu

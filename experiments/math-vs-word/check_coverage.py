@@ -36,10 +36,17 @@ def envelope_for(method: str) -> dict | None:
     """The model's canonical vendor input envelope, or None if it cannot be
     resolved (a non-embedding method, or a model with no run_rerankers key).
 
-    This is what decides whether an instructed p0 arm needs its own run: p0
-    carries no instruction text, so for a model with an EMPTY envelope the
-    p0 arm is byte-identical to the prompt-free file already on disk, and
-    re-running it would burn GPU to reproduce a file we have.
+    Reported for information only. It used to decide whether an instructed
+    p0 arm needed its own run, back when the default arm here was
+    prompt-free and p0 was not: for a model with an empty envelope the two
+    were identical, for the rest they were different runs.
+
+    Since 2026-08-26 the default arm IS p0 under the canonical protocol
+    (load_models.get_scores_kwargs(method) and
+    get_scores_kwargs(method, "p0") return the same thing by construction),
+    so <method>.json and <method>__p0.json are the same run for EVERY
+    model, empty envelope or not - see load_models.py's header. A p0 arm is
+    therefore always copyable from the default file.
     """
     import sys
 
@@ -47,9 +54,7 @@ def envelope_for(method: str) -> dict | None:
     try:
         from load_models import get_scores_kwargs
 
-        base = get_scores_kwargs(method)
-        with_envelope = get_scores_kwargs(method, "p0")
-        return {k: v for k, v in with_envelope.items() if base.get(k) != v}
+        return dict(get_scores_kwargs(method, "p0"))
     except Exception:
         return None
 
@@ -210,17 +215,19 @@ def main() -> None:
                 status, _ = inspect(method, args.sim_dir, arm)
                 if status == "ok":
                     continue
-                envelope = envelope_for(method)
-                if envelope is None:
-                    unknown.append((method, arm))
-                elif arm == "p0" and not envelope:
-                    reusable.append(method)
+                # p0 == the default arm since 2026-08-26 (see
+                # envelope_for), so it is always a copy, never a run.
+                if arm == "p0":
+                    if envelope_for(method) is None:
+                        unknown.append((method, arm))
+                    else:
+                        reusable.append(method)
                 else:
                     to_run.append((method, arm))
 
         print(f"  needs a run : {len(to_run)}")
-        print(f"  p0 reusable : {len(reusable)}  (empty envelope - the p0 arm is "
-              f"identical to the prompt-free file already on disk)")
+        print(f"  p0 reusable : {len(reusable)}  (p0 IS the default arm - the "
+              f"file already on disk is that run)")
         if unknown:
             print(f"  UNRESOLVED  : {len(unknown)}  (no run_rerankers model key - "
                   f"envelope unknown, so p0 cannot be assumed reusable)")
@@ -229,9 +236,8 @@ def main() -> None:
 
         if args.emit_commands:
             if reusable:
-                print("\n# p0 arms that are the prompt-free run under another name.")
-                print("# Copy rather than recompute - but only if you accept that")
-                print("# p0 means 'no instruction', not 'no envelope'.")
+                print("\n# p0 arms that are the default run under another name.")
+                print("# Copy rather than recompute.")
                 for method in sorted(set(reusable)):
                     stem = method.replace("/", "_")
                     print(f"cp similarities/{stem}.json similarities/{stem}__p0.json")

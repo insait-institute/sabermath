@@ -100,6 +100,7 @@ from sabermath.processors import (
     RaDeRRerankerProcessor,
     RaDeRRerankerVLLMProcessor,
     Rank1Processor,
+    Rank1HFProcessor,
     ReasonIRProcessor,
     SentenceTransformersProcessor as STProcessor,
     SpladeProcessor,
@@ -154,6 +155,10 @@ INSTRUCTION_CONTROL_REASONS = {
     "rank1-0.5b": "no instruction slot; the vendor route is rewriting the query",
     "rank1-7b": "no instruction slot; the vendor route is rewriting the query",
     "rank1-32b": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-32b-bf16": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-0.5b-hf": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-7b-hf": "no instruction slot; the vendor route is rewriting the query",
+    "rank1-32b-hf": "no instruction slot; the vendor route is rewriting the query",
     "diver-grouprank-32b": "fixed rubric template, no task slot",
     "rader-reranker-7b": "query:/document: template, no instruction slot",
 }
@@ -373,6 +378,24 @@ CUSTOM_MODEL_BUILDERS = {
     # the rank1-32b note above; >1 would be pointless at these sizes anyway).
     "rank1-7b": lambda tp: Rank1Processor("jhu-clsp/rank1-7b"),
     "rank1-0.5b": lambda tp: Rank1Processor("jhu-clsp/rank1-0.5b"),
+    # HF-transformers reference for the rank1 family. NOT production - it
+    # exists so the vLLM-native path has something to be checked against
+    # (rank1 was never migrated from HF, so it had no "before"). One
+    # generation per pair at batch size 1; expect it to be orders of
+    # magnitude slower than the vLLM path.
+    # dtype ablation, NOT a separate model. rank1-32b's checkpoint is
+    # bfloat16 and the production spec above pins vLLM to float16 (inherited
+    # from the model card), so every production run logs "Casting
+    # torch.bfloat16 to torch.float16". fp16's exponent range is far narrower
+    # than bf16's, so this key runs the identical model at the checkpoint's
+    # native precision to measure what that downcast costs. Same prompt, same
+    # scoring, same tensor_parallel_size=1 - dtype is the ONLY difference.
+    "rank1-32b-bf16": lambda tp: Rank1Processor(
+        tensor_parallel_size=1, dtype="bfloat16"
+    ),
+    "rank1-32b-hf": lambda tp: Rank1HFProcessor("jhu-clsp/rank1-32b"),
+    "rank1-7b-hf": lambda tp: Rank1HFProcessor("jhu-clsp/rank1-7b"),
+    "rank1-0.5b-hf": lambda tp: Rank1HFProcessor("jhu-clsp/rank1-0.5b"),
     # Qwen3-Reranker family: vLLM-backed since 2026-08-20 (official model-card
     # recipe; verified FEASIBLE vs the HF path, Spearman >= 0.999 - see
     # scripts/test_vllm_feasibility.py). Qwen3RerankerProcessor remains the
@@ -395,6 +418,40 @@ CUSTOM_MODEL_BUILDERS = {
     # this also restores the provenance of the published number, which
     # predates the vLLM switch. See REASONIR_INSTRUCTION_NOTE.
     "reasonir-8b": lambda tp: ReasonIRProcessor(),
+    # p0-ONLY vLLM variant of reasonir-8b, added 2026-08-26. A SEPARATE key
+    # rather than a change to the entry above, because the ST path must stay
+    # for the instructed arms and for the published number's provenance.
+    #
+    # ReasonIR declares architectures: ["ReasonIRModel"], which vLLM does not
+    # register - hence the hf_overrides redirect onto vLLM's own bidirectional
+    # Llama, which is now known correct (it reproduced a genuinely
+    # bidirectional reference for llama-embed-nemotron-8b to median |delta|
+    # 6.9e-05 with zero verdict flips).
+    #
+    # MEASURED, not assumed (experiments/math-vs-word, 969 targets, via
+    # scripts/repro_vllm_backend.py): against the ST reference built under
+    # this model's own transformers==4.47.1 pin, this recipe agrees to
+    # median |delta| 0.0012 with 2/969 verdict flips and an identical
+    # math-vs-word statistic (66.46% both). That independently confirms the
+    # "agree to cosine 0.9999 prompt-free" claim in the reasonir-8b comment
+    # above - worth stating because scripts/test_vllm_feasibility.py, which
+    # that claim cites, is not present in this repo.
+    #
+    # STRICTLY p0. See INSTRUCTION_EXCLUDED below: vLLM cannot express this
+    # model's instruction mechanism (its encode() runs a bidirectional pass
+    # over "instruction + text + embed_eos" and then zeroes the instruction
+    # positions in the POOLING mask, which a stock MEAN pooler has no way to
+    # represent), which is exactly why reasonir-8b was reverted off vLLM on
+    # 2026-08-25. Instructed arms hard-error rather than silently returning
+    # numbers from a mechanism that was not applied.
+    "reasonir-8b-vllm": lambda tp: VLLMProcessor.from_huggingface(
+        "reasonir/ReasonIR-8B",
+        hf_overrides={
+            "architectures": ["LlamaBidirectionalModel"],
+            "pooling": "avg",
+        },
+        pooler_config={"pooling_type": "MEAN", "normalize": True},
+    ),
     "splade-code-8b": lambda tp: SpladeProcessor(),
     # NOTE the 0.6B repo really is named "splade-code-06B" (no dot) -
     # verified against the HF API; "naver/splade-code-0.6B" does not exist.
@@ -564,6 +621,48 @@ TABLE_MODELS = {
         "use_vllm": True,
     },
     "bge-m3": {"model": "BAAI/bge-m3", "use_vllm": True},
+    # NOT given init_kwargs, and deliberately NOT moved off vLLM - both were
+    # tried on 2026-08-26 and both were wrong. Full trail, because the
+    # conclusion is counter-intuitive:
+    #
+    # Switching this model to vLLM changed its math-vs-word statistic by
+    # -8.98pp (70.79% -> 61.82%, 107/969 verdict flips), which looked like a
+    # vLLM defect. It is the opposite: vLLM is CORRECT and the previous
+    # SentenceTransformers numbers were silently wrong.
+    #
+    # This repo declares architectures: ["LlamaBidirectionalModel"] with an
+    # auto_map onto its own llama_bidirectional_model.py, which makes the
+    # encoder bidirectional through ONE effective hook: an override of
+    # LlamaModel._update_causal_mask() that returns no mask. (Its other hook,
+    # layer.self_attn.is_causal = False, is inert - transformers never
+    # forwards is_causal to the attention interface.) That override also
+    # ASSERTS the attention impl is flash_attention_2 or eager.
+    #
+    # transformers 5.x DELETED _update_causal_mask: LlamaModel.forward calls
+    # masking_utils.create_causal_mask directly. So under transformers 5.16.1
+    # - which an unpinned install now resolves to - the override is never
+    # called, the assert never fires, and the model runs CAUSAL while
+    # reporting nothing. Every ST number for this model produced that way is
+    # a causal run of a bidirectional model.
+    #
+    # Measured (experiments/math-vs-word, 969 targets, same subset):
+    #   ST tf5.16.1 sdpa   (causal, as published)   78.95%
+    #   vLLM fp32                                   68.02%
+    #   ST tf4.51.3 eager  (genuinely bidirectional) 68.02%
+    #   bidirectional ST vs vLLM : median |d| 8.2e-05, max 4.4e-04, 0 flips
+    #   bidirectional ST vs published ST: median |d| 8.2e-02, 29 flips
+    # i.e. vLLM reproduces the bidirectional reference to kernel precision.
+    #
+    # dtype was also ruled out: pinning float32 left the gap to the causal ST
+    # run at median 0.0884 (bf16 gave 0.0889), so precision explained none of
+    # it. No dtype pin is kept - vLLM's "auto" reads bfloat16 from the config,
+    # and the bf16 and fp32 runs give the same 61.82%.
+    #
+    # DO NOT "fix" this by setting use_vllm: False without also pinning
+    # transformers <5 AND forcing attn_implementation - ST alone silently
+    # regresses to causal. Verify any change with
+    # experiments/math-vs-word/scripts/repro_st_backend.py --attn eager,
+    # which prints whether the hook is live before it scores.
     "llama-embed-nemotron-8b": {
         "model": "nvidia/llama-embed-nemotron-8b",
         "use_vllm": True,
@@ -607,6 +706,46 @@ TABLE_MODELS = {
         },
         "disable_st_default_prompt": True,
     },
+    # vLLM CONFIRMED CORRECT for this family (2026-08-26), and the pre-2026-08-26
+    # SentenceTransformers numbers were the broken ones. Moving Octen-8B to vLLM
+    # shifted its math-vs-word statistic +6.60pp (48.30% -> 54.90%, 136/969
+    # verdict flips), which looked like a vLLM regression. It is not:
+    #
+    #   * dtype ruled out - fp32 vLLM matches bf16 vLLM to median 6.5e-04
+    #     (2/969 flips), while the gap to ST stayed at 0.069;
+    #   * pooling mode ruled out - vLLM matches ST[lasttoken] far better than
+    #     ST[mean] (0.56) or ST[cls] (0.10), i.e. LAST is resolved correctly
+    #     from the sentence_transformers config;
+    #   * tokenization ruled out CONCLUSIVELY - the two backends emit
+    #     byte-identical input ids, EOS 151643 included, and re-embedding
+    #     through vLLM with explicit prompt_token_ids changes nothing
+    #     (0.70380 via text vs 0.70351 via ids);
+    #   * padding/batching ruled out - encoding one text at a time instead of
+    #     in a padded batch changes nothing (0.99984 either way).
+    #
+    # The cause was the OLD loader. math-vs-word's _build_octen_processor
+    # HAND-BUILT a [Transformer, Pooling(lasttoken), Normalize] stack, on the
+    # premise that the generic SentenceTransformer load crashes on this repo's
+    # 2_Normalize config. Measured on the same 14 probes:
+    #
+    #     hand-built ST stack vs vLLM : cosine 0.704
+    #     GENERIC ST load     vs vLLM : cosine 0.99978
+    #
+    # The generic load works ON sentence-transformers 5.7.0 and agrees with
+    # vLLM to 2e-04. It is version-dependent: on 6.0.0 it raises
+    # "Normalize.__init__() got an unexpected keyword argument
+    # 'normalize_embeddings'" and there is then NO correct ST option at all,
+    # since the hand-built fallback is the broken one (0.68 there). So the hand-built imitation of the vendor stack was the
+    # outlier, not vLLM - the same shape of finding as llama-embed-nemotron-8b
+    # above, reached by a different route.
+    #
+    # Cross-check: Qwen/Qwen3-Embedding-4B, same architecture family, loaded
+    # GENERICALLY, agrees with vLLM at 0.9998 - so vLLM's Qwen3 embedding path
+    # is sound in general and this was never an Octen-specific vLLM problem.
+    #
+    # Reproduce with experiments/math-vs-word/scripts/diag_tokenization.py,
+    # which loads the ST side the way each model's own path does and reports
+    # which it used.
     "octen-embedding-4b": {"model": "Octen/Octen-Embedding-4B", "use_vllm": True},
     "octen-embedding-8b": {"model": "Octen/Octen-Embedding-8B", "use_vllm": True},
     "roberta-base": {
@@ -710,6 +849,13 @@ COLBERT_REPOS = {
 
 
 INSTRUCTION_EXCLUDED = {
+    "reasonir-8b-vllm": (
+        "vLLM cannot express ReasonIR's instruction mechanism - its encode() "
+        "masks the instruction positions out of the POOLING mask, not out of "
+        "the text, and a stock MEAN pooler has no way to represent that. Use "
+        "the reasonir-8b key (ReasonIRProcessor) for p1/p2/p3; this key "
+        "exists only to run p0 on vLLM"
+    ),
     "tf-idf-no-tok": (
         "same reason as tf-idf: a document-fitted vocabulary plus cosine "
         "dilution makes instruction words pure noise"

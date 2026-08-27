@@ -9,6 +9,32 @@ minimal vLLM example from the Hugging Face model card
 SamplingParams (temperature=0, max_tokens=8192, logprobs=20,
 stop=["</think> true", "</think> false"]), and true/false logprob scoring.
 
+NOTE ON dtype: the HF checkpoint is bfloat16, and `dtype="float16"` below
+forces a downcast - vLLM logs "Casting torch.bfloat16 to torch.float16" on
+every run (observed on job 753850). The value is inherited from the model
+card's example.
+
+MEASURED, and it costs nothing: jobs 753874 (bfloat16) vs 753896 (float16),
+main benchmark, same 50-query subset (--n 50 --seed 42), all 3 tasks, p0,
+dtype the only difference (env parity across vllm/torch/transformers/
+tokenizers/cuda verified on both nodes). Per-task deltas -0.0095 / -0.0001 /
++0.0003 - signs inconsistent, each within ~1 SE, 3-task mean -0.0031. Keep
+float16. Reproduce with scripts/compare_rank1_dtype.py.
+
+BUT the per-query scores are NOT reproducible across dtype: 150/150 queries
+moved, individual swings up to +/-0.22 nDCG. Precision changes the output, it
+just does not change it in a DIRECTION. Same mechanism as the greedy-chain
+divergence measured in diag_rank1_backends.py (median fork at token 212): a
+tiny numeric difference forks the reasoning chain and the scatter cancels in
+aggregate. Do not treat an individual rank1 per-query score as a fixed
+quantity, and do not diff per-query scores across runs to detect regressions -
+only aggregates are stable.
+
+This class is vLLM-NATIVE: it was never migrated from an HF implementation,
+so unlike the RaDeR and Qwen3 rerankers it had no reference to be checked
+against. Rank1HFProcessor (rank1_hf_processor.py) is that reference, added
+for exactly that purpose. It is NOT production - see its header.
+
 Ported from rag-math-test/rank-embedding-math/running-rerankers/sabermath_rank1.py
 (verified against a completed 100-query run: Mean nDCG@10 = 0.6068). That
 standalone script's larger runs (400+ and 1000 queries) were repeatedly

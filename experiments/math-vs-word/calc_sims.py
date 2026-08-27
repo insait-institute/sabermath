@@ -19,18 +19,33 @@ from load_models import ALLOWED_MODELS
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file")
+    # Defaulted so the documented bare invocation works:
+    #   sbatch scripts/run_sims.slurm --method jaccard
+    # Every caller runs from experiments/math-vs-word (run_sims.slurm cd's
+    # there), which is where config.yaml lives.
+    parser.add_argument("--config_file", default="config.yaml")
     parser.add_argument("--method")
     parser.add_argument("--force_recalc", action="store_true")
     parser.add_argument(
         "--instruction",
         default=None,
         help="Instruction-ablation arm to run (p0/p1/p2/p3/pm). Omit for the "
-        "prompt-free run every published similarities/ file holds. An "
-        "instructed arm applies the model's full vendor input envelope AS "
-        "WELL as the instruction - the same treatment run_rerankers.py gives "
-        "the main ablation - and writes similarities/<method>__<arm>.json, "
-        "so it never overwrites the prompt-free file. Embedding methods only.",
+        "default arm, which is p0 - no instruction TEXT, but still the "
+        "model's full vendor input envelope, exactly as run_dedup.py runs it. "
+        "An instructed arm writes similarities/<method>__<arm>.json so it "
+        "never overwrites the default file. Embedding methods only.",
+    )
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Reproduce the pre-2026-08-26 protocol: no vendor input "
+        "envelopes (query:/document:, Query:/Document:, RaDeR EOS, "
+        "EmbeddingGemma/jina prompts, Gemini task_type), Qwen3-Reranker on an "
+        "empty <Instruct> slot, ColBERT/GroupRank at their checkpoint "
+        "defaults. Same meaning as run_rerankers.py's and run_dedup.py's own "
+        "--legacy. Every similarities/ file produced before 2026-08-26 is a "
+        "legacy run; results are written with a __legacy tag so the two "
+        "protocols can never overwrite each other.",
     )
     args = parser.parse_args()
 
@@ -58,12 +73,15 @@ def main() -> None:
             good_candidates,
             args.force_recalc,
             instruction_key=args.instruction,
+            legacy=args.legacy,
         )
-    elif args.instruction is not None:
+    elif args.instruction is not None or args.legacy:
+        flag = "--instruction" if args.instruction is not None else "--legacy"
         raise SystemExit(
-            f"--instruction is not supported for {method}: jaccard/tf-idf/"
-            "approach0/bm25 have no instruction mechanism. They are the "
-            "CONTROL rows of the main ablation for exactly this reason "
+            f"{flag} is not supported for {method}: jaccard/tf-idf/"
+            "approach0/bm25 have no instruction mechanism and no vendor input "
+            "envelope to strip. They are the CONTROL rows of the main "
+            "ablation for exactly this reason "
             "(run_rerankers.INSTRUCTION_CONTROL_REASONS)."
         )
 

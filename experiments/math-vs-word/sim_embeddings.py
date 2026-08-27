@@ -5,7 +5,12 @@ from datasets import Dataset
 from statistics import mean
 
 from embed import get_top5_candidates
-from load_models import get_model, get_scores_kwargs
+from load_models import (
+    assert_envelope_supported,
+    get_model,
+    get_scores_kwargs,
+    wraps_instruction,
+)
 
 
 def calc_embedding_sims(
@@ -14,30 +19,35 @@ def calc_embedding_sims(
     good_candidates: Dataset,
     force_recalc: bool = False,
     instruction_key: str | None = None,
+    legacy: bool = False,
 ):
 
     PATH_ID = model_id.replace("/", "_")
-    # An instructed arm writes its OWN file. The unsuffixed name stays the
-    # prompt-free run every published similarities/ file already holds, so
-    # adding an ablation can never overwrite it.
+    # An instructed arm writes its OWN file, and so does a legacy-protocol
+    # run - same reason run_rerankers.py tags its legacy results (see its
+    # --legacy help): the two protocols must never overwrite each other.
     if instruction_key is not None:
         PATH_ID = f"{PATH_ID}__{instruction_key}"
+    if legacy:
+        PATH_ID = f"{PATH_ID}__legacy"
 
     print(f"============== {model_id} ==============")
 
-    # get_model() returns an actual sabermath.processors instance
-    # (SentenceTransformersProcessor / VLLMProcessor / GoogleProcessor) -
-    # scored below via its own .get_scores(), the exact same call
-    # sabermath.benchmark.evaluate_task() makes in production.
-    processor = get_model(model_id)
+    # Both of these delegate to scripts/run_rerankers.py, so the model is
+    # built and scored exactly as the main experiment and run_dedup.py build
+    # and score it - see load_models.py's header. instruction_key is passed
+    # to get_model as well as to get_scores_kwargs because for three
+    # families it changes the CONSTRUCTOR, not just the scoring kwargs.
+    processor = get_model(model_id, instruction_key, legacy=legacy)
 
-    # Empty for every model except the RaDeR bi-encoder family, which needs
-    # chunk_to_context/context_length forwarded to get_scores() to match
-    # scripts/run_rerankers.py's own protocol (see load_models.py's
-    # get_scores_kwargs docstring).
-    scores_kwargs = get_scores_kwargs(model_id, instruction_key)
+    # The per-model preprocessing protocol (chunk_to_context/context_length)
+    # plus the vendor input envelope (query/document prompts and suffixes,
+    # per-side API params). EmbeddingProcessor.get_scores applies the
+    # envelope per side, before the vector cache.
+    scores_kwargs = get_scores_kwargs(model_id, instruction_key, legacy=legacy)
     if scores_kwargs:
-        print(f"[~] Extra get_scores() kwargs for {model_id}: {scores_kwargs}")
+        print(f"[~] get_scores() kwargs for {model_id}: {scores_kwargs}")
+    assert_envelope_supported(model_id, processor, scores_kwargs)
 
     # The instruction is applied to the QUERY side only, through the same
     # helper sabermath.benchmark.evaluate() uses, so an instructed math-vs-word
@@ -51,14 +61,39 @@ def calc_embedding_sims(
         instruction_text = INSTRUCTIONS[instruction_key]
         print(f"[~] Instruction {instruction_key}: {instruction_text!r}")
 
+    # Some models carry the instruction through their own mechanism - the
+    # qwen3-reranker <Instruct> slot, ReasonIR's masked-prefix encode kwarg -
+    # and must NOT also get the generic wrap on top. run_rerankers decides
+    # this (its own wrap_instruction flag); we no longer guess.
+    wrap = instruction_text is not None and wraps_instruction(
+        model_id, instruction_key, legacy=legacy
+    )
+    if instruction_text is not None and not wrap:
+        print(
+            f"[~] {model_id} carries the instruction through its own "
+            f"mechanism - not applying the generic Instruct:/Query: wrap."
+        )
+
     def as_query(text: str) -> str:
-        if instruction_text is None:
+        if not wrap:
             return text
         return format_instructed_query(instruction_text, text)
 
     similarities_dict = {}
 
     output_path = f"similarities/{PATH_ID}.json"
+    # Written via a temp file + os.replace rather than open(output_path, "w"),
+    # which truncates. Two reasons, both hit in practice on 2026-08-26:
+    #   * a reader (scripts/compare_recalc.py, check_coverage.py) that lands
+    #     inside the truncate/dump window sees an empty or half-written file
+    #     and raises JSONDecodeError - observed against a running
+    #     GTE-ModernColBERT job;
+    #   * a job killed inside that window leaves a CORRUPT file, not a short
+    #     one, so the resume path cannot recover it either.
+    # os.replace is atomic within a filesystem. The name is dot-prefixed and
+    # .tmp-suffixed so the region sync-back's --exclude="*.tmp" skips it,
+    # matching run_rerankers.py's own *.json.tmp convention.
+    tmp_path = f"similarities/.{PATH_ID}.json.tmp"
 
     if not force_recalc:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -122,5 +157,6 @@ def calc_embedding_sims(
             "pr_text_vs_candidates": float(pr_text_vs_candidates),
         }
 
-        with open(output_path, "w") as f:
+        with open(tmp_path, "w") as f:
             json.dump(similarities_dict, f)
+        os.replace(tmp_path, output_path)

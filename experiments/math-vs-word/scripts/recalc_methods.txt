@@ -1,0 +1,152 @@
+# Methods for scripts/submit_force_recalc.sh - the RaDeR bi-encoders (NOT
+# rader-reranker-7b), both ModernColBERTs, both SPLADEs and Gemini-1.
+#
+# All eight live in load_models.py's ADDITIONAL_MODELS, not the original
+# 17-model roster, which is why scripts/submit_sims.sh cannot select them:
+# its EMBED/API/LEXICAL arrays only cover the original roster plus the
+# lexical controls.
+#
+#   method | env_yml | walltime | resource(gpu|cpu)
+#
+# Walltimes are deliberately longer than submit_sims.sh's: --force_recalc
+# does all 969 targets from scratch in one job, with no resume to fall back
+# on if it gets preempted.
+#
+# NOTE the RaDeR repo-name inconsistency is real and verified against the HF
+# API (scripts/run_rerankers.py:211): the 3B uses an underscore ("Qwen25_3B"),
+# the 7B/14B a hyphen ("Qwen25-7B"/"Qwen25-14B").
+Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes|environment.yml|12:00:00|gpu
+Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes|environment.yml|12:00:00|gpu
+Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes|environment.yml|1-0|gpu
+lightonai/GTE-ModernColBERT-v1|environment_colbert.yml|06:00:00|gpu
+lightonai/Reason-ModernColBERT|environment_colbert.yml|06:00:00|gpu
+splade-code-0.6b|environment_splade.yml|06:00:00|gpu
+splade-code-8b|environment_splade.yml|12:00:00|gpu
+# Gemini goes straight to generativelanguage.googleapis.com (load_models.py's
+# header documents why the internal gateway was dropped). Rate limits, not
+# compute - and a job holding an idle GPU gets reaped, so: cpu.
+google/gemini-embedding-001|environment.yml|1-0|cpu
+
+# Added 2026-08-26, after the first seven made it obvious this one belonged
+# here. EmbeddingGemma is the only model in this roster that changed on BOTH
+# axes: backend (SentenceTransformers -> vLLM) AND input envelope (it gained
+# query_prompt "task: search result | query: " / document_prompt "title:
+# none | text: ", which it previously had none of). run_rerankers.py:576 on
+# why those prompts are not optional - "EmbeddingGemma is a
+# prompt-template-trained model: its documented grammar is a fixed closed
+# set, not free text" - so the old prompt-free run was feeding it
+# off-grammar input. 300M params, so cheap despite mattering a lot.
+google/embeddinggemma-300m|environment.yml|06:00:00|gpu
+
+# ---------------------------------------------------------------------------
+# Added 2026-08-26: every REMAINING method whose call actually changed when
+# load_models.py started delegating to run_rerankers.py. Grouped by what
+# changed, because that is what predicts how much the numbers can move.
+#
+# DELIBERATELY EXCLUDED - 9 methods whose call is provably IDENTICAL, so
+# re-running them can only reproduce the file already on disk:
+#   Qwen/Qwen3-Embedding-8B, google/gemini-embedding-2,
+#   hanhainebula/reason-embed-qwen3-8b-0928, AQ-MedAI/Diver-Retriever-4B,
+#   AQ-MedAI/Diver-Retriever-0.6B, infly/inf-retriever-v1-pro,
+#   jhu-clsp/rank1-32b, rader-reranker-7b.
+# (reasonir/ReasonIR-8B WAS on this list and did not belong - see its entry
+# at the bottom of this file.)
+# The two SPLADEs were in that category too and came back bit-identical
+# (0/969 values changed), which is the empirical check on this reasoning.
+# Also excluded: microsoft/codebert-base, which has no run_rerankers key.
+#
+# Every entry below uses environment.yml: all of them are either vLLM-backed
+# (which it pins at 0.26.0) or API-only. The ColBERT/SPLADE envs are only
+# needed by methods already re-run.
+
+# --- ENVELOPE ADDED (the RaDeR failure mode: input the model was not
+# --- trained to receive). jina-v5-nano is the worst of them - its spec also
+# --- carries disable_st_default_prompt, because sentence-transformers'
+# --- default_prompt_name is "document" for this repo, so the old prompt-less
+# --- path prepended "Document: " to QUERIES as well as documents.
+jinaai/jina-embeddings-v5-text-nano|environment.yml|06:00:00|gpu
+jinaai/jina-embeddings-v5-text-small|environment.yml|12:00:00|gpu
+
+# --- SILENT TRUNCATION -> chunk_to_context at 512. Same class of defect as
+# --- GTE-ModernColBERT's 48-token query cap, which turned out to clip 60%
+# --- of full problem statements.
+google-bert/bert-base-uncased|environment.yml|06:00:00|gpu
+FacebookAI/roberta-base|environment.yml|06:00:00|gpu
+intfloat/multilingual-e5-large|environment.yml|06:00:00|gpu
+
+# --- VENDOR <Instruct> SLOT: p0 must fill it with the vendor default to be a
+# --- real "no task instruction" baseline; the old code left it empty.
+qwen3-reranker-0.6b|environment.yml|06:00:00|gpu
+qwen3-reranker-4b|environment.yml|12:00:00|gpu
+qwen3-reranker-8b|environment.yml|12:00:00|gpu
+
+# --- PER-ARM SCAFFOLD RESERVE (per-document token budget).
+diver-grouprank-32b|environment.yml|1-0|gpu
+
+# --- BACKEND ONLY: SentenceTransformers -> vLLM. No envelope change, but a
+# --- different pooling/loading path, so not assumed to be a no-op. The two
+# --- marked (gemma3) previously used the hand-built lasttoken+normalize ST
+# --- crash-workaround that is now gone.
+Qwen/Qwen3-Embedding-0.6B|environment.yml|06:00:00|gpu
+Qwen/Qwen3-Embedding-4B|environment.yml|12:00:00|gpu
+BAAI/bge-m3|environment.yml|06:00:00|gpu
+microsoft/harrier-oss-v1-270m|environment.yml|06:00:00|gpu
+microsoft/harrier-oss-v1-0.6b|environment.yml|06:00:00|gpu
+nvidia/llama-embed-nemotron-8b|environment.yml|12:00:00|gpu
+Octen/Octen-Embedding-4B|environment.yml|12:00:00|gpu
+Octen/Octen-Embedding-8B|environment.yml|12:00:00|gpu
+tencent/KaLM-Embedding-Gemma3-12B-2511|environment.yml|1-0|gpu
+microsoft/harrier-oss-v1-27b|environment.yml|1-0|gpu
+
+# --- REMOVED 2026-08-26: text-embedding-3-small / -large.
+# --- They were listed here on the grounds that they moved from a local
+# --- OpenRouterEmbeddingProcessor copy (not an EmbeddingProcessor) to
+# --- sabermath.processors.OpenRouterEmbeddingProcessor. That is a real
+# --- change, but NOT a numerical one - verified line by line:
+# ---   * same API call, same model id ("openai/<name>", prefixed in both);
+# ---   * same texts encoded, documents + [query], same order;
+# ---   * same cosine expression, (docs/|docs|) @ (q/|q|), same float32;
+# ---   * scores_kwargs {} both ways - API_MODEL_SCORES_KWARGS carries an
+# ---     entry for gemini-embedding-001 ONLY, and run_rerankers.py:672
+# ---     records that text-embedding-3-* "have no mechanism of any kind".
+# --- What the canonical class adds is a vector cache (changes API COST, not
+# --- values - the 5 candidates are reused across the 3 query variants) and
+# --- zero-norm guards that raise instead of yielding nan. Re-running them
+# --- would measure OpenAI API nondeterminism, not a protocol fix.
+
+# --- PROCESSOR CLASS CHANGE, found 2026-08-26 while auditing the models I
+# --- had excluded as "provably identical". This one was NOT. The old code
+# --- built it with VLLMProcessor.from_huggingface(hf_overrides=
+# --- {LlamaBidirectionalModel, avg}, pooler_config={MEAN, normalize}),
+# --- while run_rerankers.py reverted reasonir-8b from vLLM to the official
+# --- remote-code ReasonIRProcessor on 2026-08-25: vLLM cannot express the
+# --- one thing that makes its instruction mechanism work (a bidirectional
+# --- pass that then zeroes the instruction positions in the POOLING mask).
+# --- Needs its own env - transformers pinned to EXACTLY 4.47.1 - and note
+# --- that a mismatch there fails SILENTLY, with the job still exiting 0.
+reasonir/ReasonIR-8B|environment_reasonir.yml|12:00:00|gpu
+
+# ---------------------------------------------------------------------------
+# Added 2026-08-26: three methods that were in the paper's main table but had
+# NEVER been added to load_models.ALLOWED_MODELS, so math-vs-word had no
+# result for them at all. These are NEW RUNS, not re-runs - there is no
+# baseline file, so submit_force_recalc.sh will say so and compare_recalc.py
+# will report "no baseline". That is correct: nothing to compare against.
+#
+# rank1-7b / rank1-0.5b are the Rank1 size ablations - same processor, prompt
+# and scoring as rank1-32b, just a different HF repo, tensor_parallel_size
+# pinned to 1 (>1 silently corrupts rank1 scores - see Rank1Processor._init).
+jhu-clsp/rank1-0.5b|environment.yml|06:00:00|gpu
+jhu-clsp/rank1-7b|environment.yml|12:00:00|gpu
+
+# inf-x-retriever is the full infly SYSTEM: inf-query-aligner rewrites each
+# query, then the REWRITE is embedded with the official instruct prefix
+# against prefix-less documents, through the same retriever backend as
+# inf-retriever-v1-pro (so the two rows isolate the rewrite+prefix effect).
+# Needs the inf-retriever env - its remote code wants transformers==4.51.3
+# EXACTLY. Two 7B models co-resident (~30GB bf16+fp16), fine on one H200.
+# Its per-query rewrite log lands in similarities/.rewrites/ (load_models
+# passes the similarities dir as save_dir), which the region sync-back ships
+# back with the results and check_coverage.py's non-recursive *.json glob
+# correctly ignores.
+inf-x-retriever|environment_inf_retriever.yml|1-0|gpu

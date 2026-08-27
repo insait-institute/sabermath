@@ -35,6 +35,7 @@ except ImportError:
 from .approach0_processor import Approach0Processor
 
 from .rank1_processor import Rank1Processor
+from .rank1_hf_processor import Rank1HFProcessor
 from .qwen3_reranker_processor import Qwen3RerankerProcessor
 from .colbert_processor import ColBERTProcessor
 from .reasonir_processor import ReasonIRProcessor

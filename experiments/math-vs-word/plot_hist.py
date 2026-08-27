@@ -89,6 +89,10 @@ ALL_MODEL_IDS = [
     "text-embedding-3-small",
     # RERANK
     "jhu-clsp/rank1-32b",
+    # --- Added 2026-08-26 ---
+    "jhu-clsp/rank1-7b",
+    "jhu-clsp/rank1-0.5b",
+    "inf-x-retriever",
     "qwen3-reranker-8b",
     "qwen3-reranker-4b",
     "qwen3-reranker-0.6b",
@@ -144,6 +148,9 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     "text-embedding-3-large": "Text-Embedding-3 Large",
     "text-embedding-3-small": "Text-Embedding-3 Small",
     "jhu-clsp/rank1-32b": "Rank1 32B",
+    "jhu-clsp/rank1-7b": "Rank1 7B",
+    "jhu-clsp/rank1-0.5b": "Rank1 0.5B",
+    "inf-x-retriever": "INF-X-Retriever",
     "qwen3-reranker-8b": "Qwen3-Reranker 8B",
     "qwen3-reranker-4b": "Qwen3-Reranker 4B",
     "qwen3-reranker-0.6b": "Qwen3-Reranker 0.6B",
@@ -229,6 +236,9 @@ DEFAULT_MODEL_MARKER_SYMBOLS = {
     # visually: they rendered as blank/invisible in
     # plots/maths_vs_words_all_models.pdf).
     "jhu-clsp/rank1-32b": ">",
+    "jhu-clsp/rank1-7b": ">",  # shares rank1-32b's triangle_right
+    "jhu-clsp/rank1-0.5b": ">",  # shares rank1-32b's triangle_right
+    "inf-x-retriever": "8",  # shares inf-retriever-v1-pro's octagon
     "infly/inf-retriever-v1-pro": "8",  # shares BAAI/bge-m3's octagon
     "nvidia/llama-embed-nemotron-8b": "v",  # shares RoBERTa's triangle_down
     "intfloat/multilingual-e5-large": "^",  # shares the Google family's triangle_up
@@ -303,6 +313,9 @@ DEFAULT_MODEL_COLORS = {
     "lightonai/Reason-ModernColBERT": "#a1887f",
     # Standalone entities
     "jhu-clsp/rank1-32b": "#c62828",
+    "jhu-clsp/rank1-7b": "#e53935",
+    "jhu-clsp/rank1-0.5b": "#ef9a9a",
+    "inf-x-retriever": "#26a69a",
     "infly/inf-retriever-v1-pro": "#00695c",
     "nvidia/llama-embed-nemotron-8b": "#558b2f",
     "intfloat/multilingual-e5-large": "#546e7a",

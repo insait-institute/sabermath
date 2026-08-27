@@ -1,0 +1,36 @@
+# VERSION PROBE for the Octen-8B ST-vs-vLLM divergence. Identical to
+# environment.yml's inference stack except sentence-transformers is pinned to
+# 6.0.0 instead of 5.7.0.
+#
+# WHY THESE TWO VERSIONS:
+#   5.3.0 - the pin scripts/rerankers/envs/env_colbert.yml uses. Older
+#           Normalize may not reject Octen's 2_Normalize/config.json
+#           ({"normalize_embeddings": true}), which is the ONLY reason
+#           _build_octen_processor hand-builds the stack. If the GENERIC load
+#           works here, Octen can finally be compared to vLLM the same way
+#           Qwen3-Embedding-4B was (which agreed at 0.9998).
+#   6.0.0 - the version env_st_biencoders.yml warns about: its
+#           modules.Transformer silently wraps every input in the tokenizer's
+#           CHAT TEMPLATE, so lasttoken pooling embeds a template token
+#           instead of the last content token. Octen HAS a chat_template.jinja.
+#           If 6.0.0 reproduces the 0.70 divergence and 5.7.0 does not, or
+#           vice versa, that localises it to the ST side.
+#
+# vllm stays at 0.26.0 - Qwen3-Embedding-4B already reproduced the ST
+# reference to 0.9998 on it, so the vLLM side is not the variable here.
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - datasets
+      - tqdm
+      - transformers
+      - vllm==0.26.0
+      - flashinfer-python==0.6.14
+      - sentence-transformers==6.0.0
+      - peft
+      - numpy
+      - pyyaml

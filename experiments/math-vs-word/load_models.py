@@ -10,292 +10,118 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # sabermath package's - so `import sabermath` isn't guaranteed to resolve
 # without this, same convention as scripts/measure_query_time.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-# Reuses scripts/run_rerankers.py's own verified builders for the RaDeR
-# bi-encoders and INF-Retriever-v1-Pro instead of duplicating their
-# hard-won recipes here - see each one's own docstring in that file for the
-# full history (chat-template corruption, wedged vLLM engines, etc.).
-# Importable safely: everything below its `if __name__ == "__main__":`
-# guard, no argparse/model-loading side effects at import time.
+# Every model here is built and scored through scripts/run_rerankers.py's
+# own functions rather than a second set of recipes - see the block below
+# for what that fixed. Importable safely: everything used from it lives
+# below its `if __name__ == "__main__":` guard, so there are no
+# argparse/model-loading side effects at import time.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
-from run_rerankers import (  # noqa: E402
-    RADER_BIENCODER_MODELS,
-    _build_inf_retriever_processor,
-    _build_rader_biencoder_vllm,
-)
-from sabermath.processors import (  # noqa: E402
-    ColBERTProcessor,
-    GoogleProcessor,
-    GroupRankProcessor,
-    Qwen3RerankerVLLMProcessor,
-    RaDeRRerankerVLLMProcessor,
-    Rank1Processor,
-    SentenceTransformersProcessor,
-    SpladeProcessor,
-    VLLMProcessor,
-)
+from run_rerankers import RADER_BIENCODER_MODELS  # noqa: E402
+from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
 
-# Every model below that ALSO appears in scripts/run_rerankers.py's
-# GENERIC_MODELS (the actual harness that produced the paper's reported
-# numbers) is loaded exactly the way that entry specifies. qwen3-embedding-8b
-# is the only overlap: {"model": "Qwen/Qwen3-Embedding-8B", "use_vllm": True}
-# with no init_kwargs - i.e. plain VLLMProcessor.from_huggingface(name), no
-# pooler_config override (vLLM's own default pooling is trusted there).
+# HOW MODELS ARE BUILT AND CALLED HERE (changed 2026-08-26)
+# --------------------------------------------------------
+# This file no longer maintains its own roster of builders and per-model
+# get_scores kwargs. Every model is built and scored by delegating to
+# scripts/run_rerankers.py's own functions:
 #
-# No other model in ALLOWED_MODELS below appears in GENERIC_MODELS at all, so
-# for all of them this falls through to sabermath.benchmark._make_processor's
-# own default (use_vllm=False) - i.e. plain
-# SentenceTransformersProcessor.from_huggingface(name, trust_remote_code=True).
-# That is the one general-purpose HuggingFace loading path this repo's
-# processors actually define - EXCEPT the 4 models in _CUSTOM_BUILDERS below,
-# confirmed (test_model_loading.py, jobs run 2026-08-22) to crash under that
-# generic path with no workaround:
-#   - harrier-oss-v1-27b / KaLM-Embedding-Gemma3-12B-2511: both Gemma3-based;
-#     sentence-transformers' Transformer module unconditionally calls
-#     AutoProcessor.from_pretrained(), which routes Gemma3 to a multimodal
-#     image-processor loader neither (text-only) repo ships -
-#     OSError: Can't load image processor for '<repo>'.
-#   - Octen-Embedding-4B/8B: both ship a 2_Normalize/config.json with the old
-#     {"normalize_embeddings": true} kwarg, but sentence-transformers'
-#     current Normalize module takes no constructor args at all -
-#     TypeError: Normalize.__init__() got an unexpected keyword argument
-#     'normalize_embeddings'.
-# The two builders below are ported verbatim from
-# scripts/measure_query_time.py's _build_gemma3_text_embedding_processor()/
-# _build_octen_processor() - the only validated recipes for these 4 models
-# in this repo. pooling_mode="lasttoken" and the trailing L2-normalize are
-# not a guess - both fetched directly from each repo's own
-# 1_Pooling/config.json (pooling_mode_lasttoken: true) / modules.json
-# (a 2_Normalize module).
-GOOGLE_MODELS = {"google/gemini-embedding-001", "google/gemini-embedding-2"}
+#     rr._build_experiment_processor(key, instruction_key, tp, save_dir, legacy)
+#     rr._experiment_scores_kwargs(key, instruction_text, legacy)
+#
+# which is exactly what scripts/run_dedup.py does (run_dedup.py:188-199 and
+# 291-295). The main experiment, the dedup experiment and math-vs-word now go
+# through one code path, so "how do we call this model" has exactly one
+# answer per model, defined in one place.
+#
+# WHY: the parallel roster had drifted badly from run_rerankers.py. It was
+# written when the only models here were the original 17 and the only overlap
+# with run_rerankers was qwen3-embedding-8b in GENERIC_MODELS - the claim the
+# old comment here made ("No other model in ALLOWED_MODELS appears in
+# GENERIC_MODELS at all"). run_rerankers.TABLE_MODELS then grew to cover 16 of
+# those 17, and this file was never updated, so as of 2026-08-26 it differed
+# from the paper's own harness on:
+#
+#   * BACKEND, 15 models. TABLE_MODELS runs qwen3-embedding-4b/0.6b, bge-m3,
+#     kalm-12b, embeddinggemma-300m, bert-base-uncased, roberta-base, all
+#     three harrier, octen-4b/8b, llama-embed-nemotron-8b, e5-large and
+#     jina-v5-small under vLLM (the 2026-08-20 rollout, each FEASIBLE-verified
+#     at Spearman 0.999-1.0). This file ran every one of them through
+#     SentenceTransformers instead.
+#   * INPUT ENVELOPE, 10 models. Dropped entirely: the RaDeR family's
+#     "query: "/"document: " markers plus RADER_EXPECTED_EOS suffixes,
+#     EmbeddingGemma's "task: search result | query: "/"title: none | text: ",
+#     both jina-v5 "Query: "/"Document: ", and gemini-embedding-001's
+#     RETRIEVAL_QUERY/RETRIEVAL_DOCUMENT task_type.
+#   * CHUNKING, 3 models. bert-base-uncased, roberta-base and e5-large take
+#     _CHUNK512_SCORES_KWARGS in the main experiment; here they silently
+#     truncated at the ST default instead.
+#   * PROCESSOR ARGUMENTS, 6 models. Both ColBERTs ran at the checkpoint's own
+#     query_length instead of EXPERIMENT_COLBERT_QUERY_LENGTH - and ColBERT
+#     pads queries to that length with mask tokens, so it changes the query
+#     representation for identical text. diver-grouprank-32b ran without
+#     EXPERIMENT_GROUPRANK_SCAFFOLD_RESERVE; all three qwen3-rerankers ran
+#     with an empty <Instruct> slot rather than the vendor default.
+#   * PROCESSOR CLASS, 2 models. text-embedding-3-large/small went through a
+#     local copy of OpenRouterEmbeddingProcessor that was not an
+#     EmbeddingProcessor at all - no vector cache, and no way to apply an
+#     envelope.
+#
+# The old ST-crash workarounds for the four Gemma3/Octen models
+# (_build_gemma3_text_embedding_processor / _build_octen_processor) are gone
+# with the ST path itself: those four are use_vllm=True in TABLE_MODELS.
+#
+# DO NOT RESURRECT THEM FROM GIT HISTORY. _build_octen_processor was not just
+# unnecessary, it was WRONG. Measured 2026-08-26 on 14 probe texts
+# (scripts/diag_tokenization.py):
+#
+#     hand-built stack vs vLLM : cosine 0.704
+#     GENERIC ST load  vs vLLM : cosine 0.99978
+#
+# Its premise - that the generic SentenceTransformer load crashes on Octen's
+# 2_Normalize config - is VERSION-DEPENDENT, and false on the version this
+# experiment actually runs. Measured directly:
+#     sentence-transformers 5.7.0 : generic load SUCCEEDS
+#     sentence-transformers 6.0.0 : generic load raises
+#         TypeError: Normalize.__init__() got an unexpected keyword
+#         argument 'normalize_embeddings'
+# So on 6.0.0 the ST path has NO correct option for this model: the generic
+# load is unavailable and the hand-built fallback is wrong (0.68 vs vLLM
+# there, 0.70 on 5.7.0). That is an additional reason to keep Octen on vLLM
+# rather than to reinstate an ST builder. The hand-built imitation of the vendor stack
+# produced embeddings ~0.3 cosine away from both the generic stack and vLLM,
+# which is why the pre-delegation Octen numbers moved +6.60pp when this file
+# started delegating. vLLM is the correct backend for Octen; the old ST
+# numbers were the broken ones. See the octen-embedding-* entry in
+# scripts/run_rerankers.py for the full elimination trail.
+#
+# CONSEQUENCE FOR EXISTING RESULTS: every file in similarities/ predates this
+# change and was produced by the old path. The default arm here is now the
+# CANONICAL protocol (legacy=False), the same one run_rerankers.py and
+# run_dedup.py default to; pass --legacy to calc_sims.py to reproduce the old
+# prompt-free numbers, which writes to <method>__legacy.json so the two can
+# never overwrite each other. See scripts/instructions/PROTOCOL.md.
+#
+# THE ONE EXCEPTION: microsoft/codebert-base is not in the paper's model
+# table and has no run_rerankers.py key, so there is no canonical call for it
+# to match. It keeps the generic SentenceTransformers path, and is the only
+# model that does.
+_NO_EXPERIMENT_KEY = {"microsoft/codebert-base"}
 
-# The Gemini calls originally went through an internal AI-gateway proxy
-# instead of hitting Google directly - dropped (2026-08-22) after
-# confirming, independent of this code, that the gateway itself rejects
-# every key tried against it (curl -H "x-goog-api-key: <key>"
-# .../v1beta/models -> {"error":"Invalid Key"}), while the SAME key
-# succeeds immediately against Google's real endpoint
-# (generativelanguage.googleapis.com). Matches
-# scripts/measure_query_time.py's own CLOSED_API_BUILDERS convention too
-# (GoogleProcessor(name), no base_url) - going direct is both the thing
-# proven to work and the thing that matches production.
+# tensor_parallel_size. This module pins CUDA_VISIBLE_DEVICES=0 above, so
+# there is exactly one visible GPU and tp>1 is not expressible. Matches
+# submit_sims.sh, which allocates --gpus=h200:1 per job.
+_TENSOR_PARALLEL_SIZE = 1
 
-
-def _build_gemma3_text_embedding_processor(model_name: str):
-    from sentence_transformers import SentenceTransformer
-    from sentence_transformers.sentence_transformer import modules
-    from transformers import AutoModel, AutoTokenizer
-
-    class _RawTextTransformer(modules.InputModule):
-        save_in_root = True
-
-        def __init__(self):
-            super().__init__()
-            self._auto_model = AutoModel.from_pretrained(
-                model_name, trust_remote_code=True, torch_dtype="auto"
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name, trust_remote_code=True
-            )
-
-        def preprocess(self, inputs, prompt=None, **kwargs):
-            if prompt:
-                inputs = self._prepend_prompt(inputs, prompt)
-            return dict(
-                self.tokenizer(
-                    list(inputs), padding=True, truncation=True, return_tensors="pt"
-                )
-            )
-
-        def forward(self, features, **kwargs):
-            model_inputs = {
-                k: v
-                for k, v in features.items()
-                if k in ("input_ids", "attention_mask", "token_type_ids")
-            }
-            outputs = self._auto_model(**model_inputs)
-            features["token_embeddings"] = outputs.last_hidden_state
-            return features
-
-        def get_embedding_dimension(self) -> int:
-            return self._auto_model.config.hidden_size
-
-        def save(self, output_path, *args, **kwargs):
-            raise NotImplementedError(
-                "_RawTextTransformer is a load_models.py workaround only, "
-                "not meant to be saved."
-            )
-
-    transformer = _RawTextTransformer()
-    pooling = modules.Pooling(
-        transformer.get_embedding_dimension(), pooling_mode="lasttoken"
-    )
-    normalize = modules.Normalize()
-    st = SentenceTransformer(modules=[transformer, pooling, normalize])
-    return SentenceTransformersProcessor(st, model_name)
-
-
-def _build_octen_processor(model_name: str):
-    from sentence_transformers import SentenceTransformer
-    from sentence_transformers.sentence_transformer import modules
-
-    transformer = modules.Transformer(
-        model_name,
-        model_kwargs={"trust_remote_code": True, "torch_dtype": "auto"},
-        config_kwargs={"trust_remote_code": True},
-    )
-    pooling = modules.Pooling(
-        transformer.get_embedding_dimension(), pooling_mode="lasttoken"
-    )
-    normalize = modules.Normalize()
-    st = SentenceTransformer(modules=[transformer, pooling, normalize])
-    return SentenceTransformersProcessor(st, model_name)
-
-
-# text-embedding-3-large/small via OpenRouter, not OpenAI directly - reuses
-# the existing .openroutertok key (already used by
-# scripts/measure_query_time.py's OpenRouterEmbeddingProcessor for these
-# exact two models) rather than requiring a separate real OpenAI key.
-# sabermath.processors.OpenAIProcessor has no way to point at a custom
-# base_url, so this replicates its async batching/retry logic here instead
-# of touching that file - ported verbatim from measure_query_time.py's own
-# class of the same name.
-class OpenRouterEmbeddingProcessor:
-    processor = "openrouter"
-
-    def __init__(self, model_name: str, api_key: str | None = None):
-        import os as _os
-        import warnings as _warnings
-
-        try:
-            from openai import AsyncOpenAI
-        except ImportError as e:
-            raise ImportError("Please install openai to use it as a processor") from e
-
-        client_args = {"base_url": "https://openrouter.ai/api/v1"}
-
-        if api_key is not None:
-            client_args["api_key"] = api_key
-        elif _os.getenv("OPENROUTER_API_KEY"):
-            client_args["api_key"] = _os.getenv("OPENROUTER_API_KEY")
-        else:
-            _warnings.warn(
-                "No OpenRouter API key was provided. Set OPENROUTER_API_KEY "
-                "or pass api_key=... explicitly. This may cause "
-                "authentication issues.",
-                stacklevel=2,
-            )
-
-        self._model_name = model_name
-        self._client = AsyncOpenAI(**client_args)
-
-    @property
-    def model(self) -> str:
-        return self._model_name
-
-    async def _encode_one(self, text, sem, *, retries: int = 4, **kwargs):
-        import asyncio as _asyncio
-
-        last_error = None
-        for attempt in range(retries):
-            try:
-                async with sem:
-                    response = await self._client.embeddings.create(
-                        model=f"openai/{self._model_name}", input=text, **kwargs
-                    )
-                return response.data[0].embedding
-            except Exception as e:
-                last_error = e
-                if attempt < retries - 1:
-                    await _asyncio.sleep(2**attempt)
-        raise RuntimeError(
-            f"Failed to encode text after {retries} attempts."
-        ) from last_error
-
-    async def encode_async(
-        self,
-        texts,
-        show_progress_bar: bool = True,
-        *,
-        max_concurrency: int = 20,
-        retries: int = 3,
-        **kwargs,
-    ):
-        import asyncio as _asyncio
-
-        import numpy as _np
-
-        if max_concurrency <= 0:
-            raise ValueError('"max_concurrency" must be >= 1')
-        sem = _asyncio.Semaphore(max_concurrency)
-        coros = [self._encode_one(text, sem, retries=retries, **kwargs) for text in texts]
-        results = await _asyncio.gather(*coros)
-        return _np.asarray(results, dtype=_np.float32)
-
-    def get_scores(
-        self,
-        query: str,
-        documents: list[str],
-        *,
-        show_progress_bar: bool = True,
-        max_concurrency: int = 20,
-        retries: int = 3,
-        **kwargs,
-    ):
-        # No caching/get_scores in the original class - added here so this
-        # matches every other processor's uniform get_scores() interface
-        # that sim_embeddings.py calls generically.
-        import asyncio as _asyncio
-
-        import numpy as _np
-
-        async def _run():
-            embeddings = await self.encode_async(
-                documents + [query],
-                show_progress_bar=show_progress_bar,
-                max_concurrency=max_concurrency,
-                retries=retries,
-                **kwargs,
-            )
-            query_emb = embeddings[-1]
-            doc_embs = embeddings[:-1]
-            q_norm = _np.linalg.norm(query_emb)
-            d_norms = _np.linalg.norm(doc_embs, axis=1, keepdims=True)
-            return (doc_embs / d_norms) @ (query_emb / q_norm)
-
-        return _asyncio.run(_run())
-
-
-# jina-v5-nano/-small's custom remote-code modeling forward() hard-requires
-# a task to be set - NOT optional/stylistic (confirmed on job 736681:
-# "ValueError: Task must be specified before encoding data" - it doesn't
-# default to anything on its own). Set at load time via model_kwargs
-# (equivalent to the old embed.py's per-call task="retrieval" encode kwarg,
-# which no longer exists now that encoding goes through the generic
-# EmbeddingProcessor.get_scores() -> encode() path with no per-model hook).
-_EXTRA_MODEL_KWARGS = {
-    "jinaai/jina-embeddings-v5-text-nano": {"default_task": "retrieval"},
-    "jinaai/jina-embeddings-v5-text-small": {"default_task": "retrieval"},
-}
-
-# RaDeR bi-encoders' production protocol chunks long documents rather than
-# silently truncating - ported from
-# scripts/run_rerankers.py's _RADER_BIENCODER_SCORES_KWARGS. Only 0.32% of
-# documents exceed 2048 tokens, but the numbers must stay
-# preprocessing-identical to the paper's own protocol.
-_RADER_SCORES_KWARGS = {"chunk_to_context": True, "context_length": 2048}
-
-_SCORES_KWARGS = {
-    RADER_BIENCODER_MODELS["rader-14b"]: _RADER_SCORES_KWARGS,
-    RADER_BIENCODER_MODELS["rader-7b"]: _RADER_SCORES_KWARGS,
-    RADER_BIENCODER_MODELS["rader-3b"]: _RADER_SCORES_KWARGS,
-}
+# Only ever read by run_rerankers' inf-x-retriever builder, which is not in
+# ALLOWED_MODELS - but _build_experiment_processor takes it unconditionally.
+_SAVE_DIR = str(Path(__file__).resolve().parent / "similarities")
 
 
 # HF repo string -> the short model key scripts/run_rerankers.py uses, built
 # by inverting that file's own spec dicts rather than hand-maintaining a
-# second roster here. Only needed for the instructed arms below: the
-# prompt-free default never has to reach run_rerankers' per-model envelopes.
+# second roster here. Every call below goes through this: the model key IS
+# the thing that decides how the model is built and scored.
 def _model_key_by_id() -> dict:
     import run_rerankers as rr
 
@@ -346,134 +172,138 @@ def model_key_for(model_id: str) -> str:
     return key
 
 
-def get_scores_kwargs(model_id: str, instruction_key: str | None = None) -> dict:
-    """Extra kwargs sim_embeddings.py must forward to processor.get_scores().
+def _instruction_args(instruction_key: str | None) -> tuple[str, str | None]:
+    """(instruction_key, instruction_text) as run_rerankers wants them.
 
-    instruction_key=None (the default, and what every existing similarities/
-    file was produced with) keeps this experiment PROMPT-FREE: the only
-    kwargs are chunk_to_context/context_length for the RaDeR bi-encoder
-    family (see _SCORES_KWARGS above). No vendor input envelope is applied.
-
-    Passing an instruction key instead switches the model to the SAME
-    canonical treatment scripts/run_rerankers.py uses for the instruction
-    ablation - the model's full vendor envelope (query/document prompts and
-    suffixes, API params) on top of the chunking. The instruction text
-    itself is not returned here; sim_embeddings.py wraps the query with it
-    via sabermath.instructions.format_instructed_query, exactly as
-    sabermath.benchmark.evaluate() does.
-
-    Note the consequence, because it is easy to miss: for a model with a
-    non-empty envelope the instructed p0 arm is NOT the same run as the
-    existing prompt-free file, and the two must not be compared directly.
-    For the ~32 methods whose envelope is empty they are identical.
+    instruction_key=None means this experiment's default arm. It maps to
+    "p0", whose INSTRUCTIONS entry is None - i.e. "no instruction text", the
+    same arm run_dedup.py pins itself to (it passes "p0" to the processor
+    builder and None as the instruction text). p0 is NOT prompt-free: under
+    the canonical protocol the model's vendor envelope still applies.
     """
-    kwargs = dict(_SCORES_KWARGS.get(model_id, {}))
-    if instruction_key is None:
-        return kwargs
-
-    import run_rerankers as rr
     from sabermath.instructions import INSTRUCTIONS
 
+    if instruction_key is None:
+        return "p0", INSTRUCTIONS["p0"]
     if instruction_key not in INSTRUCTIONS:
         raise ValueError(
             f"Unknown instruction key {instruction_key!r} - valid: "
             f"{sorted(INSTRUCTIONS)}"
         )
-    envelope, _ = rr._experiment_scores_kwargs(
-        model_key_for(model_id), INSTRUCTIONS[instruction_key], legacy=False
+    return instruction_key, INSTRUCTIONS[instruction_key]
+
+
+def get_scores_kwargs(
+    model_id: str,
+    instruction_key: str | None = None,
+    legacy: bool = False,
+) -> dict:
+    """Every kwarg sim_embeddings.py must forward to processor.get_scores().
+
+    Delegates to run_rerankers._experiment_scores_kwargs, so this is the
+    same preprocessing protocol (chunk_to_context/context_length) and the
+    same vendor input envelope (query_prompt/document_prompt/suffixes/
+    per-side API params) the main experiment and run_dedup.py use.
+
+    legacy=True strips the envelope only, reproducing the pre-2026-08-25
+    prompt-free protocol - identical in meaning to run_rerankers.py's and
+    run_dedup.py's own --legacy.
+    """
+    if model_id in _NO_EXPERIMENT_KEY:
+        return {}
+
+    import run_rerankers as rr
+
+    key, instruction_text = _instruction_args(instruction_key)
+    kwargs, _ = rr._experiment_scores_kwargs(
+        model_key_for(model_id), instruction_text, legacy=legacy
     )
-    kwargs.update(envelope)
     return kwargs
 
 
-# Every entry below that also appears in scripts/run_rerankers.py's
-# CUSTOM_MODEL_BUILDERS or GENERIC_MODELS (the harness that produced the
-# paper's reported numbers) is built via the EXACT same call - pooler
-# configs, hf_overrides, dtype pins, and all - since these are load-bearing
-# per that file's own extensive comments (silently wrong pooling has
-# corrupted numbers here before, e.g. the RaDeR mean-pooling incident).
-# Keyed by the model's own HF repo string where one naturally exists (EMBED
-# entries); by the short key run_rerankers.py itself uses where it doesn't
-# (RERANK entries built from multi-argument processor constructors, not a
-# bare "give me this HF repo" call).
-_CUSTOM_BUILDERS = {
-    # --- Gemma3/Octen loading-crash workarounds (unchanged) ---
-    "microsoft/harrier-oss-v1-27b": _build_gemma3_text_embedding_processor,
-    "tencent/KaLM-Embedding-Gemma3-12B-2511": _build_gemma3_text_embedding_processor,
-    "Octen/Octen-Embedding-4B": _build_octen_processor,
-    "Octen/Octen-Embedding-8B": _build_octen_processor,
-    # --- EMBED: GENERIC_MODELS-equivalent vLLM builds (pooler_config
-    # load-bearing - vLLM's own arch default is NOT trusted for these) ---
-    "Qwen/Qwen3-Embedding-8B": lambda name: VLLMProcessor.from_huggingface(name),
-    "hanhainebula/reason-embed-qwen3-8b-0928": lambda name: VLLMProcessor.from_huggingface(
-        name, pooler_config={"pooling_type": "LAST", "normalize": True}
-    ),
-    "AQ-MedAI/Diver-Retriever-4B": lambda name: VLLMProcessor.from_huggingface(
-        name, pooler_config={"pooling_type": "LAST", "normalize": True}
-    ),
-    "AQ-MedAI/Diver-Retriever-0.6B": lambda name: VLLMProcessor.from_huggingface(
-        name,
-        pooler_config={"pooling_type": "LAST", "normalize": True},
-        dtype="bfloat16",
-    ),
-    # --- EMBED: CUSTOM_MODEL_BUILDERS-equivalent vLLM builds ---
-    "reasonir/ReasonIR-8B": lambda name: VLLMProcessor.from_huggingface(
-        name,
-        hf_overrides={
-            "architectures": ["LlamaBidirectionalModel"],
-            "pooling": "avg",
-        },
-        pooler_config={"pooling_type": "MEAN", "normalize": True},
-    ),
-    RADER_BIENCODER_MODELS["rader-14b"]: lambda name: _build_rader_biencoder_vllm(name),
-    RADER_BIENCODER_MODELS["rader-7b"]: lambda name: _build_rader_biencoder_vllm(name),
-    RADER_BIENCODER_MODELS["rader-3b"]: lambda name: _build_rader_biencoder_vllm(name),
-    "infly/inf-retriever-v1-pro": lambda name: _build_inf_retriever_processor(name),
-    # --- RERANK: short-keyed (no single natural HF-repo dispatch) ---
-    "jhu-clsp/rank1-32b": lambda name: Rank1Processor(tensor_parallel_size=1),
-    "qwen3-reranker-8b": lambda name: Qwen3RerankerVLLMProcessor(),
-    "qwen3-reranker-4b": lambda name: Qwen3RerankerVLLMProcessor(
-        "Qwen/Qwen3-Reranker-4B"
-    ),
-    "qwen3-reranker-0.6b": lambda name: Qwen3RerankerVLLMProcessor(
-        "Qwen/Qwen3-Reranker-0.6B"
-    ),
-    "splade-code-8b": lambda name: SpladeProcessor(),
-    "splade-code-0.6b": lambda name: SpladeProcessor("naver/splade-code-06B"),
-    "rader-reranker-7b": lambda name: RaDeRRerankerVLLMProcessor(),
-    "diver-grouprank-32b": lambda name: GroupRankProcessor(tensor_parallel_size=1),
-    # --- RERANK: ColBERT (natural HF-repo dispatch) ---
-    "lightonai/GTE-ModernColBERT-v1": lambda name: ColBERTProcessor(name),
-    "lightonai/Reason-ModernColBERT": lambda name: ColBERTProcessor(name),
-}
+def wraps_instruction(
+    model_id: str,
+    instruction_key: str | None = None,
+    legacy: bool = False,
+) -> bool:
+    """Whether the caller should wrap the query with the generic
+    "Instruct: ...\\nQuery: ..." template.
 
-# text-embedding-3-large/small: OpenRouter, not the generic ST/vLLM path at
-# all - see OpenRouterEmbeddingProcessor above.
-_OPENROUTER_MODELS = {"text-embedding-3-large", "text-embedding-3-small"}
+    False when the model carries the instruction through its own mechanism
+    and the generic wrap must NOT be applied on top:
+
+      * reasonir-8b - its encode() takes the instruction as an argument and
+        masks exactly those tokens out of the mean pool, so the instruction
+        reaches it via query_encode_kwargs, not as query text.
+      * the qwen3-reranker family - the instruction fills the model's own
+        <Instruct> slot at construction time (run_rerankers sets
+        query_instruction=None for them, run_rerankers.py:1372-1375).
+
+    The old code here discarded run_rerankers' wrap_instruction flag and
+    wrapped unconditionally, which double-applied the instruction for
+    reasonir-8b and applied it twice over for the qwen3-rerankers.
+    """
+    if model_id in _NO_EXPERIMENT_KEY:
+        return True
+
+    import run_rerankers as rr
+
+    key, instruction_text = _instruction_args(instruction_key)
+    model_key = model_key_for(model_id)
+    _, wrap = rr._experiment_scores_kwargs(model_key, instruction_text, legacy=legacy)
+    if model_key in rr.QWEN3_RERANKER_REPOS:
+        return False
+    return wrap
 
 
-def get_model(MODEL_ID: str):
-    if MODEL_ID in GOOGLE_MODELS:
-        api_model_name = MODEL_ID.removeprefix("google/")
-        print(f"Loading {MODEL_ID} via GoogleProcessor ({api_model_name})...")
-        return GoogleProcessor(api_model_name)
+def assert_envelope_supported(model_id: str, processor, scores_kwargs: dict) -> None:
+    """run_rerankers' own guard: envelope kwargs are applied by
+    EmbeddingProcessor.get_scores, so a cross-encoder would silently swallow
+    them. Fail loudly instead of scoring with a dropped envelope."""
+    if model_id in _NO_EXPERIMENT_KEY:
+        return
 
-    if MODEL_ID in _OPENROUTER_MODELS:
-        print(f"Loading {MODEL_ID} via OpenRouterEmbeddingProcessor...")
-        return OpenRouterEmbeddingProcessor(MODEL_ID)
+    import run_rerankers as rr
 
-    if MODEL_ID in _CUSTOM_BUILDERS:
-        print(f"Loading {MODEL_ID} via its custom builder (see _CUSTOM_BUILDERS)...")
-        return _CUSTOM_BUILDERS[MODEL_ID](MODEL_ID)
+    rr._assert_envelope_supported(model_key_for(model_id), processor, scores_kwargs)
 
-    print(f"Loading {MODEL_ID} via SentenceTransformersProcessor.from_huggingface...")
-    extra_model_kwargs = _EXTRA_MODEL_KWARGS.get(MODEL_ID)
-    return SentenceTransformersProcessor.from_huggingface(
-        MODEL_ID,
-        trust_remote_code=True,
-        **({"model_kwargs": extra_model_kwargs} if extra_model_kwargs else {}),
+
+def get_model(
+    MODEL_ID: str,
+    instruction_key: str | None = None,
+    legacy: bool = False,
+):
+    """The processor for MODEL_ID, built exactly as the main experiment and
+    run_dedup.py build it.
+
+    instruction_key matters at BUILD time, not just at scoring time, for
+    three families - the qwen3-rerankers (the instruction fills their
+    <Instruct> slot), diver-grouprank-32b (per-arm scaffold token reserve)
+    and the ColBERTs (query_length) - which is why it is taken here and not
+    only in get_scores_kwargs.
+    """
+    if MODEL_ID in _NO_EXPERIMENT_KEY:
+        print(
+            f"Loading {MODEL_ID} via SentenceTransformersProcessor."
+            f"from_huggingface (no run_rerankers key - see _NO_EXPERIMENT_KEY)..."
+        )
+        return SentenceTransformersProcessor.from_huggingface(
+            MODEL_ID, trust_remote_code=True
+        )
+
+    import run_rerankers as rr
+
+    key, _ = _instruction_args(instruction_key)
+    model_key = model_key_for(MODEL_ID)
+    protocol = "legacy" if legacy else "canonical"
+    print(
+        f"Loading {MODEL_ID} as run_rerankers model key {model_key!r} "
+        f"(arm {key}, {protocol} protocol) via "
+        f"run_rerankers._build_experiment_processor..."
     )
-
+    return rr._build_experiment_processor(
+        model_key, key, _TENSOR_PARALLEL_SIZE, _SAVE_DIR, legacy=legacy
+    )
 
 ALLOWED_MODELS = [
     "Qwen/Qwen3-Embedding-8B",
@@ -496,11 +326,10 @@ ALLOWED_MODELS = [
 ]
 
 # Added 2026-08-22 to cover the rest of the paper's model table beyond the
-# 17 above (which were the original math-vs-word roster). See load_models.py's
-# _CUSTOM_BUILDERS/get_scores_kwargs for how each of these is actually
-# built/scored - many need a specific pooler_config/dtype/chunking that
-# differs from the generic SentenceTransformersProcessor.from_huggingface()
-# fallback the 17 above mostly use.
+# 17 above (which were the original math-vs-word roster). How each one is
+# built and scored is not decided here - it is whatever run_rerankers.py's
+# spec dicts say for that model's key, reached via model_key_for(). The two
+# lists differ only in when they were added; they get identical treatment.
 ADDITIONAL_MODELS = [
     # EMBED
     "hanhainebula/reason-embed-qwen3-8b-0928",  # Reason-Embed-Qwen3-8B
@@ -514,11 +343,17 @@ ADDITIONAL_MODELS = [
     "nvidia/llama-embed-nemotron-8b",  # LLaMA-Embed-Nemotron-8B
     "intfloat/multilingual-e5-large",  # Multilingual-E5-Large
     "jinaai/jina-embeddings-v5-text-small",  # Jina-v5-Text-Small
-    # API (OpenRouter - see OpenRouterEmbeddingProcessor)
+    # API (OpenRouter - run_rerankers.API_MODELS routes these)
     "text-embedding-3-large",
     "text-embedding-3-small",
     # RERANK
     "jhu-clsp/rank1-32b",  # Rank1-32B
+    # Rank1 size ablations, added 2026-08-26. Keyed by HF repo the same way
+    # rank1-32b is: model_key_for() resolves these through its
+    # last-path-component-lowercased fallback ("jhu-clsp/rank1-7b" ->
+    # "rank1-7b"), which is a real CUSTOM_MODEL_BUILDERS key.
+    "jhu-clsp/rank1-7b",  # Rank1-7B
+    "jhu-clsp/rank1-0.5b",  # Rank1-0.5B
     "qwen3-reranker-8b",
     "qwen3-reranker-4b",
     "qwen3-reranker-0.6b",
@@ -528,6 +363,12 @@ ADDITIONAL_MODELS = [
     "diver-grouprank-32b",  # Diver-GroupRank-32B
     "lightonai/GTE-ModernColBERT-v1",  # GTE-ModernColBERT
     "lightonai/Reason-ModernColBERT",  # Reason-ModernColBERT
+    # INF-X-Retriever, added 2026-08-26. Short-keyed, not HF-repo-keyed: it
+    # is a composed SYSTEM (inf-query-aligner rewrites the query, then the
+    # rewrite is embedded against prefix-less documents by the retriever
+    # half), so there is no single repo to dispatch on - same convention as
+    # diver-grouprank-32b / rader-reranker-7b.
+    "inf-x-retriever",  # INF-X-Retriever
 ]
 
 ALLOWED_MODELS = ALLOWED_MODELS + ADDITIONAL_MODELS
