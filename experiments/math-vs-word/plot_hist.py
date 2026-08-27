@@ -335,9 +335,36 @@ parser.add_argument(
     action="store_true",
     help="Plot all models in ALL_MODEL_IDS instead of the smaller default MODEL_IDS list.",
 )
+parser.add_argument(
+    "--instruction",
+    default=None,
+    help="Plot the instructed similarity files instead of the plain "
+    "baseline ones - e.g. --instruction 1 (or p1) reads "
+    "similarities/<model>__p1.json instead of similarities/<model>.json. "
+    "Accepts 1/2/3 or p1/p2/p3. jaccard/tf-idf/approach0 have no "
+    "instructed variant (see load_models.py's instruction-exclusion "
+    "reasons) - those fall back to their plain baseline file with a "
+    "printed notice rather than erroring the whole plot.",
+)
 
 args = parser.parse_args()
 config_file = args.config_file
+
+
+def _normalize_instruction_suffix(value: str | None) -> str | None:
+    if value is None:
+        return None
+    key = str(value).strip().lower()
+    if key.startswith("p"):
+        key = key[1:]
+    if key not in {"1", "2", "3"}:
+        raise ValueError(
+            f"--instruction must be 1/2/3 or p1/p2/p3, got {value!r}"
+        )
+    return f"p{key}"
+
+
+INSTRUCTION_SUFFIX = _normalize_instruction_suffix(args.instruction)
 
 SELECTED_MODEL_IDS = ALL_MODEL_IDS if args.all else MODEL_IDS
 PLOT_MODEL_IDS = SELECTED_MODEL_IDS + [MATH_TOKEN_RATIO_MODEL_ID]
@@ -412,7 +439,22 @@ def model_to_color(
 
 def load_similarity_content(model_id: str) -> dict[str, dict[str, Any]]:
     model_name = model_to_file_stem(model_id)
-    path = Path("similarities") / f"{model_name}.json"
+    baseline_path = Path("similarities") / f"{model_name}.json"
+    path = baseline_path
+
+    if INSTRUCTION_SUFFIX is not None:
+        instructed_path = Path("similarities") / f"{model_name}__{INSTRUCTION_SUFFIX}.json"
+        if instructed_path.exists():
+            path = instructed_path
+        else:
+            # jaccard/tf-idf/approach0 are excluded from instructions
+            # entirely (see load_models.py) and never get a __p1/p2/p3
+            # file - fall back to the plain baseline for just this model
+            # rather than erroring the whole plot over 3 known exceptions.
+            print(
+                f"[~] No {instructed_path.name} for {model_id!r} - "
+                f"falling back to its baseline file ({baseline_path.name})."
+            )
 
     if not path.exists():
         raise FileNotFoundError(
@@ -501,10 +543,23 @@ def target_math_token_ratio(target: Mapping[str, Any]) -> float:
 #     similarity band - fp16's quantization step near 1.0 collapses
 #     genuinely-different scores onto the same representable float -
 #     9/969 targets tied.
+# A fourth confirmed the same way once inf-x-retriever was added to this
+# file's model lists (that addition didn't also add it here, which crashed
+# --all outright - not related to --instruction, reproduces with neither
+# flag set):
+#   - inf-x-retriever: shares inf-retriever-v1-pro's byte-identical
+#     retriever backend (see scripts/run_rerankers.py's own comment on
+#     INFXRetrieverProcessor) - same fp16/anisotropy tie behavior -
+#     6/969 targets tied.
 # Any OTHER model hitting this is still treated as a real bug (raised
 # below) - an unexpected tie in a continuous-score model is worth
 # investigating, not silently skipping.
-MODELS_WITH_EXPECTED_TIES = {"jaccard", "diver-grouprank-32b", "infly/inf-retriever-v1-pro"}
+MODELS_WITH_EXPECTED_TIES = {
+    "jaccard",
+    "diver-grouprank-32b",
+    "infly/inf-retriever-v1-pro",
+    "inf-x-retriever",
+}
 
 
 def aggregate_maths_greater_than_words_by_domain(
@@ -926,6 +981,10 @@ output_filename = (
     if args.all
     else "maths_vs_words_selected_models.pdf"
 )
+if INSTRUCTION_SUFFIX is not None:
+    # Never silently overwrite the baseline plot - same reasoning as
+    # similarities/<model>__p1.json not overwriting similarities/<model>.json.
+    output_filename = output_filename.replace(".pdf", f"__{INSTRUCTION_SUFFIX}.pdf")
 
 fig, ax = plot_maths_greater_than_words_points(
     percentages_by_model,
