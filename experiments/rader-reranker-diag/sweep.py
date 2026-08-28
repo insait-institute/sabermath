@@ -40,7 +40,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from sabermath.data import load_data  # noqa: E402
 from sabermath.benchmark import transform  # noqa: E402
 
-TASKS = ["statement-statement", "full-full"]
+# All three benchmark tasks. The first template sweep (2026-08-28) ran only
+# the two LENGTH EXTREMES - statement-statement (short query, short doc) and
+# full-full (long, long) - to keep it cheap, which left the committed T10
+# template's effect on statement-full unmeasured. Use --tasks to restrict.
+TASKS = ["statement-statement", "statement-full", "full-full"]
 
 # Each arm returns the plain STRING for a (query, document) pair; the eos is
 # appended as a token id afterwards unless the arm is in NO_EOS.
