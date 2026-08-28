@@ -18,6 +18,22 @@ https://github.com/Debrup-61/RaDeR):
 expected: the trained head arrives with the adapter via modules_to_save.)
 
 Deviations from the reference, all deliberate:
+- THE INPUT TEMPLATE. rerank.py builds f"query: {q} document: {d}{eos}";
+  this builds "query: Query: {q} document:  {d} <eos>" (the "T10" arm of
+  experiments/rader-reranker-diag/sweep.py). Two independent reasons, each
+  measured on a frozen 60-query subset (statement-statement, nDCG@10):
+    * a space before the eos: +0.0167 [+0.0072,+0.0262], p=0.001,
+      replicated across two independent jobs. The paper's Appendix G writes
+      the input as "query:{q} document:{d} <eos>" - that space is real.
+      (Appendix G ALSO drops the post-colon spaces; that part is neutral to
+      harmful, -0.0046 [-0.0127,+0.0036], so it is NOT copied here.)
+    * the Tevatron reconstruction ("Query: " prefix, which every training
+      row carries, + the empty-title double space): +0.0064, p=0.31 alone.
+  Together +0.0223 [+0.0089,+0.0357], p=0.002, and additive (interaction
+  -0.0008). NOTE the combination is not significantly better than the
+  pre-eos space alone (+0.0056, p=0.35) - it is adopted because it also
+  matches the recovered training format, not on its own evidence.
+  Every published rader-reranker-7b number PREDATES this template.
 - flash_attention_2 is opt-in (`use_flash_attn=True`) rather than hardcoded,
   since flash-attn is a separate compiled install not present in this
   pipeline's envs; SDPA attention is numerically equivalent.
@@ -111,18 +127,35 @@ class RaDeRRerankerProcessor(ModelProcessor):
         self._model = model
 
     def _build_input_ids(self, query: str, document: str) -> list[int]:
-        """Tokenize "query: {q} document: {d}", truncate the document part so
-        the sequence (plus the final eos) fits max_length, then append eos."""
-        prefix_ids = self._tokenizer(
-            f"query: {query} document: ", add_special_tokens=False
-        ).input_ids
-        doc_ids = self._tokenizer(document, add_special_tokens=False).input_ids
+        """Build "query: Query: {q} document:  {d} <eos>" - the T10 template
+        (see the module docstring for why it, and not rerank.py's).
 
-        budget = self._max_length - len(prefix_ids) - 1
+        Only the document is truncated, and the trailing space + eos are
+        appended AFTER truncating, so the scoring position is always the eos
+        and the pre-eos space can never be the thing that gets trimmed.
+
+        Two spacing details are load-bearing and must not be "tidied":
+        - The space between "document:" and the document rides on the
+          DOCUMENT side (prefix ends "document: ", doc is " " + document).
+          Qwen2 BPE merges a leading space into the following token
+          (" Problem" is ONE token), so splitting the pair anywhere else
+          changes the ids. Verified: this split reproduces the one-shot
+          tokenization of the T10 string on 625/625 real pairs.
+        - The double space after "document:" is what Tevatron's format_pair
+          actually produced for this checkpoint (empty title slot), and
+          " " vs "  " are DIFFERENT single tokens (220 vs 256), so the
+          doubling is a real change, not whitespace noise."""
+        prefix_ids = self._tokenizer(
+            f"query: Query: {query} document: ", add_special_tokens=False
+        ).input_ids
+        doc_ids = self._tokenizer(" " + document, add_special_tokens=False).input_ids
+        tail_ids = self._tokenizer(" ", add_special_tokens=False).input_ids
+
+        budget = self._max_length - len(prefix_ids) - len(tail_ids) - 1
         if budget > 0 and len(doc_ids) > budget:
             doc_ids = doc_ids[:budget]
 
-        return prefix_ids + doc_ids + [self._tokenizer.eos_token_id]
+        return prefix_ids + doc_ids + tail_ids + [self._tokenizer.eos_token_id]
 
     def get_scores(
         self,

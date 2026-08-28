@@ -160,7 +160,7 @@ INSTRUCTION_CONTROL_REASONS = {
     "rank1-7b-hf": "no instruction slot; the vendor route is rewriting the query",
     "rank1-32b-hf": "no instruction slot; the vendor route is rewriting the query",
     "diver-grouprank-32b": "fixed rubric template, no task slot",
-    "rader-reranker-7b": "query:/document: template, no instruction slot",
+    "rader-reranker-7b": "T10 query:/Query:/document: template, no instruction slot",
 }
 INSTRUCTION_CONTROL_MODELS = frozenset(INSTRUCTION_CONTROL_REASONS)
 

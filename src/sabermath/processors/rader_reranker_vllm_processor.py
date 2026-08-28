@@ -9,9 +9,12 @@ model ONCE (peft merge_and_unload, cached to a local dir - see
 vllm_processor.artifact_cache_dir for where and why) and loads the merged
 checkpoint as a plain Qwen2ForSequenceClassification.
 
-Scoring inputs are the exact "query: {q} document: {d}<eos>" token ids the
-HF path builds (doc-side truncation so prefix+doc+eos fits max_length, eos
-appended AFTER truncating so the scoring position is always the eos), passed
+Scoring inputs are the exact "query: Query: {q} document:  {d} <eos>" token
+ids the HF path builds - the T10 template, NOT rerank.py's; see
+RaDeRRerankerProcessor's module docstring for the measurements behind it
+(doc-side truncation so prefix+doc+tail+eos fits max_length, the trailing
+space and eos appended AFTER truncating so the scoring position is always
+the eos and the space is never what gets trimmed), passed
 as TokensPrompt to llm.classify() with the classifier activation disabled -
 softmax over a single label would be a constant 1.0, and the raw logit keeps
 scores directly comparable to the HF path.
@@ -140,15 +143,16 @@ class RaDeRRerankerVLLMProcessor(ModelProcessor):
     def _build_input_ids(self, query: str, document: str) -> list[int]:
         """Keep in sync with RaDeRRerankerProcessor._build_input_ids."""
         prefix_ids = self._tokenizer(
-            f"query: {query} document: ", add_special_tokens=False
+            f"query: Query: {query} document: ", add_special_tokens=False
         ).input_ids
-        doc_ids = self._tokenizer(document, add_special_tokens=False).input_ids
+        doc_ids = self._tokenizer(" " + document, add_special_tokens=False).input_ids
+        tail_ids = self._tokenizer(" ", add_special_tokens=False).input_ids
 
-        budget = self._max_length - len(prefix_ids) - 1
+        budget = self._max_length - len(prefix_ids) - len(tail_ids) - 1
         if budget > 0 and len(doc_ids) > budget:
             doc_ids = doc_ids[:budget]
 
-        return prefix_ids + doc_ids + [self._tokenizer.eos_token_id]
+        return prefix_ids + doc_ids + tail_ids + [self._tokenizer.eos_token_id]
 
     def get_scores(
         self,
