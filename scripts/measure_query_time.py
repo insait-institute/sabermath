@@ -112,6 +112,7 @@ from sabermath.processors import (
     GoogleProcessor,
     JaccardProcessor,
     SentenceTransformersProcessor as STProcessor,
+    RetroStarRewrittenProcessor,
     SpladeProcessor,
     TfidfProcessor,
     VLLMProcessor,
@@ -301,12 +302,86 @@ RERANKER_BUILDERS = {
     ),
     "rader-reranker-7b": _production_custom("rader-reranker-7b"),
     "diver-grouprank-32b": _production_custom("diver-grouprank-32b"),
+    # Retro*-Qwen3-32B, added 2026-08-28. Generative POINTWISE reranker, so
+    # the "reranker" category default applies unchanged: its get_scores
+    # already takes batch_size (added for this harness - production passes
+    # None and lets vLLM schedule all ~150 candidates itself), which is
+    # exactly the 16-per-step slicing every other reranker here gets.
+    "retro-star-32b": _production_custom("retro-star-32b"),
+    # Retro* scoring the REWRITTEN query. Unlike the composed EMBEDDING rows
+    # above, this one is timed with the rewrite CACHED, and that is forced by
+    # the model, not a choice: its production build gives the 32B reranker
+    # gpu_memory_utilization=0.85 precisely because the 7B generator is never
+    # expected to load, so a check_cache=False run would try to bring it up
+    # into the remaining sliver and die (require_cached_rewrites=True exists
+    # to turn that into a clear error instead of an allocator message).
+    #
+    # So read this number as "reranking cost GIVEN a rewrite". The end-to-end
+    # cost is that plus the rewriter half, which is already measured
+    # independently as reason-rewriter-reason-embed-8b (same 7B generator,
+    # same 5 rewrites, same recipe fingerprint) - its ~30 s/query IS the
+    # generation term. Reporting the two separately is more informative than
+    # one fused number that no single GPU configuration can actually produce.
+    "retro-star-32b-rewritten": _production_custom("retro-star-32b-rewritten"),
+    # END-TO-END variant of the row above: the rewrite IS generated inside the
+    # timed region. It cannot use the production builder, which pins the 32B
+    # at gpu_memory_utilization=0.85 so the 7B generator can never co-load.
+    # This build takes the CO-RESIDENT split that RetroStarRewrittenProcessor
+    # defaults to and that retro-star-8b-rewritten already runs in production
+    # (0.55 reranker + 0.30 rewriter = 0.85 total, both engines on one H200),
+    # and drops require_cached_rewrites so check_cache=False actually
+    # generates.
+    #
+    # READ IT AS A SUM, NOT AS A DROP-IN REPLACEMENT for the cached row: the
+    # reranker half here has ~13GB of KV cache instead of ~77GB, so with
+    # ~11k-token prompts it schedules fewer candidates concurrently and its
+    # RERANKING component is inflated relative to the production number. What
+    # this measures honestly is "both halves on one GPU"; what it cannot
+    # measure is production reranking plus generation, because no single-GPU
+    # configuration runs that.
+    "retro-star-32b-rewritten-uncached": lambda: RetroStarRewrittenProcessor(
+        "ljw13/retro-star-qwen3-32b-0928",
+        tensor_parallel_size=1,
+        rewrite_log_path=(
+            "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+        ),
+        gpu_memory_utilization=0.55,
+        rewriter_gpu_memory_utilization=0.30,
+        require_cached_rewrites=False,
+    ),
 }
 
 EMBEDDING_BUILDERS = {
     # Reranker-pipeline bi-encoders: production builders, verbatim.
     "reasonir-8b": _production_custom("reasonir-8b"),
     "reason-embed-qwen3-8b": _production_generic("reason-embed-qwen3-8b"),
+    # Reason-Embed-LLaMA-3.1-8B, added 2026-08-28. _production_generic
+    # forwards the spec's init_kwargs, so it keeps the LAST+normalize pooler
+    # AND max_model_len=40960 that the main experiment pins it to - a timing
+    # number taken at llama-3.1's 131072 default would not describe the model
+    # as the benchmark actually runs it.
+    "reason-embed-llama-3.1-8b": _production_generic("reason-embed-llama-3.1-8b"),
+    # COMPOSED REWRITE SYSTEMS (rewriter generates, then the rewrite is
+    # embedded). Added 2026-08-29. inf-x-retriever already had a
+    # MODEL_ENV_YML entry in run_timing.slurm but no builder here, so it had
+    # never actually been timeable - these three close that.
+    #
+    # The embedding category's _NO_CACHE is load-bearing, not incidental:
+    # check_cache/update_cache govern the REWRITE cache as well as the inner
+    # vector cache (InfXRetrieverProcessor.get_scores says so explicitly;
+    # ReasonRewriterProcessor._rewrite does the same), so check_cache=False
+    # forces the rewrite to be generated for every measured query and the
+    # generation lands INSIDE the timed region. That is the whole point - a
+    # cached run would time a dict lookup plus an encode and report a
+    # composed system as though it cost the same as its embedder half.
+    # update_cache=False additionally keeps these runs from writing the
+    # shared rewrite log, so they are safe to run beside the math-vs-word
+    # chain that is actively generating into it.
+    "inf-x-retriever": _production_custom("inf-x-retriever"),
+    "reason-rewriter-reason-embed-8b": _production_custom("reason-rewriter-reason-embed-8b"),
+    "reason-rewriter-reason-embed-llama-3.1-8b": _production_custom(
+        "reason-rewriter-reason-embed-llama-3.1-8b"
+    ),
     "diver-retriever-4b": _production_generic("diver-retriever-4b"),
     "diver-retriever-0.6b": _production_generic("diver-retriever-0.6b"),
     "rader-3b": _production_custom("rader-3b"),
@@ -416,6 +491,9 @@ _MODEL_SCORES_KWARGS = {
     "text-embedding-3-large": {**_NO_CACHE, "max_concurrency": BATCH_SIZE},
     # No per-doc scoring hook to slice (pya0 search engine) - the one genuine
     # exception to the 16-per-step protocol:
+    # The whole point of this row - without it the reranker category default
+    # leaves check_cache on and the rewrite is a dict lookup, not a generation.
+    "retro-star-32b-rewritten-uncached": {**_NO_CACHE, "batch_size": BATCH_SIZE},
     "approach0": {},
 }
 
@@ -427,6 +505,11 @@ _BUILDER_BATCHING_NOTE = {
     "gte-moderncolbert": f"encode_batch_size={BATCH_SIZE} (constructor)",
     "reason-moderncolbert": f"encode_batch_size={BATCH_SIZE} (constructor)",
     "diver-grouprank-32b": "group_size=20 kept (scoring protocol, not batching); generate calls sliced at 16",
+    "retro-star-32b-rewritten-uncached": "composed END-TO-END: 5 rewrites generated per query INSIDE the timed region; co-resident split 0.55 reranker + 0.30 rewriter (reranking half slower than production 0.85); generate calls sliced at 16",
+    "retro-star-32b-rewritten": "composed: rewrite READ FROM CACHE (32B holds 0.85 of the GPU; generator cannot co-load) - excludes generation, add reason-rewriter-reason-embed-8b for end-to-end; generate calls sliced at 16",
+    "inf-x-retriever": "composed: query rewrite generated per query (uncached, inside the timed region); documents sliced at 16",
+    "reason-rewriter-reason-embed-8b": "composed: 5 rewrites generated per query (uncached, inside the timed region), embeddings mean-pooled; documents sliced at 16",
+    "reason-rewriter-reason-embed-llama-3.1-8b": "composed: 5 rewrites generated per query (uncached, inside the timed region), embeddings mean-pooled; documents sliced at 16",
     "approach0": "NOT sliceable: pya0 search engine, no per-doc scoring hook",
     "gemini-embedding-2": "API forces batch_size=1; 16 concurrent single-doc requests instead",
     "text-embedding-3-small": "no batch API; max_concurrency=16 as the parallelism analog",

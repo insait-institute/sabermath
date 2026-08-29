@@ -369,6 +369,31 @@ ADDITIONAL_MODELS = [
     # half), so there is no single repo to dispatch on - same convention as
     # diver-grouprank-32b / rader-reranker-7b.
     "inf-x-retriever",  # INF-X-Retriever
+    # math-vs-word rewritten arm, added 2026-08-28. All four are short-keyed
+    # for the same reason inf-x-retriever is: three are composed SYSTEMS with
+    # no single repo to dispatch on, and retro-star-32b is a
+    # CUSTOM_MODEL_BUILDERS entry whose key is not its repo's last path
+    # component. model_key_for() takes all four via its
+    # "already a short key" branch.
+    #
+    # The three -rewritten rows put the instruction on the REWRITER only:
+    # run_rerankers wraps it into the query text, which is what _rewrite()
+    # consumes, and their query side then embeds/scores the rewrite. That is
+    # the default composed behaviour - do NOT substitute
+    # reason-rewriter-reason-embed-8b-instructed here, which additionally
+    # instructs the encoder half and is a different experiment.
+    "retro-star-32b",  # Retro*-Qwen3-32B
+    "retro-star-32b-rewritten",  # Retro*-Qwen3-32B on the rewritten query
+    "reason-rewriter-reason-embed-8b",  # ReasonEmbed-Qwen3-8B-rewritten
+    "reason-rewriter-reason-embed-llama-3.1-8b",  # ReasonEmbed-Llama-3.1-8B-rewritten
+    # ReasonEmbed-LLaMA-3.1-8B, added 2026-08-29. HF-repo-keyed like the Qwen3
+    # sibling above rather than short-keyed: it is a plain GENERIC_MODELS
+    # bi-encoder, so _model_key_by_id() inverts its spec["model"] straight to
+    # the "reason-embed-llama-3.1-8b" key. Only the composed rows need a short
+    # key. This is the STANDALONE encoder - the rewritten counterpart is the
+    # reason-rewriter-... entry directly above, and the pair is what makes the
+    # rewrite's effect on the math/word split readable for this checkpoint.
+    "hanhainebula/reason-embed-llama-3.1-8b-0928",  # ReasonEmbed-Llama-3.1-8B
 ]
 
 ALLOWED_MODELS = ALLOWED_MODELS + ADDITIONAL_MODELS

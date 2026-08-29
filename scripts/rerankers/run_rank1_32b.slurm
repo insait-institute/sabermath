@@ -89,7 +89,22 @@ fi
 
 source scripts/rerankers/_common.sh
 
-mkenv -n reranker-rank1 -f scripts/rerankers/envs/env_vllm.yml -- \
+# SERIALIZED. `mkenv` does not just create a missing env - it re-runs its
+# postinstall (`pip install -e .`) every time, which MUTATES an existing env:
+# job 753873's log shows it uninstalling numpy 2.3.5 and reinstalling 2.4.6.
+# Two jobs sharing the env name therefore corrupt each other's interpreter
+# mid-transaction. 753873 died on `ModuleNotFoundError: No module named
+# 'argparse'` - stdlib missing - one minute after 753874 started building the
+# same `reranker-rank1` env on the same node. scripts/rerankers/_common.sh has
+# no lock of its own; this is the same flock experiments/math-vs-word/scripts/
+# run_sims.slurm has used since it hit the identical race.
+#
+# NOTE the lock does NOT protect a job merely USING the env while another
+# job's mkenv rewrites it. Two jobs that share an env name must not overlap at
+# all - submit the second with --dependency=afterany:<first>.
+mkdir -p "/scratch/$USER/locks"
+flock "/scratch/$USER/locks/mkenv-reranker-rank1.lock" \
+  mkenv -n reranker-rank1 -f scripts/rerankers/envs/env_vllm.yml -- \
   python scripts/run_rerankers.py --models rank1-32b "$@"
 
 echo "Done."

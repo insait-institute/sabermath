@@ -3,8 +3,9 @@
 Reason-ModernColBERT, ReasonIR, SPLADE-code 0.6B/8B, RaDeR bi-encoders
 3B/7B/14B, RaDeR-reranker-7B, Diver-GroupRank-32B, INF-Retriever-v1-Pro,
 INF-X-Retriever), plus the models that run through the generic HuggingFace
-path (Qwen3-Embedding-8B, Reason-Embed-Qwen3-8B, Diver-Retriever 0.6B/4B),
-across all three tasks (statement-statement, statement-full, full-full).
+path (Qwen3-Embedding-8B, the four Reason-Embed 0928 checkpoints,
+Diver-Retriever 0.6B/4B), across all three tasks (statement-statement,
+statement-full, full-full).
 
 Each model/task run is checkpointed after every query to
 "<save-to>/.checkpoints/<model>/<subset>/<task>.json" (see
@@ -25,7 +26,7 @@ IMPORTANT - dependency isolation: since the 2026-08-20 vLLM-default rollout
 most models here run from ONE environment, scripts/rerankers/envs/
 env_vllm_feas.yml (vllm==0.26.0 pinned + peft for rader-reranker-7b's
 one-off LoRA merge): rank1, diver-grouprank, every qwen3-reranker,
-reasonir-8b, the rader bi-encoders + reranker, and all four GENERIC_MODELS.
+reasonir-8b, the rader bi-encoders + reranker, and every GENERIC_MODELS entry.
 Only three exceptions still need their own envs - GTE/Reason-ModernColBERT
 (pylate pins sentence-transformers==5.3.0, env_colbert.yml), SPLADE
 (SparseEncoder, env_splade.yml), and the inf-retriever-v1-pro /
@@ -77,11 +78,13 @@ from typing import get_args
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sabermath import evaluate
+from sabermath.benchmark import transform
 from sabermath.data import load_data
 from sabermath.instructions import (
     DEFAULT_INSTRUCTION_TEMPLATE,
     INSTRUCTION_TEMPLATES,
     INSTRUCTIONS,
+    format_instructed_query,
 )
 from sabermath.processors.embedding_processor import AFFIX_KEYS
 from sabermath.processors import (
@@ -102,6 +105,9 @@ from sabermath.processors import (
     Rank1Processor,
     Rank1HFProcessor,
     ReasonIRProcessor,
+    ReasonRewriterProcessor,
+    RetroStarProcessor,
+    RetroStarRewrittenProcessor,
     SentenceTransformersProcessor as STProcessor,
     SpladeProcessor,
     TfidfProcessor,
@@ -504,12 +510,139 @@ CUSTOM_MODEL_BUILDERS = {
     "inf-x-retriever": lambda tp: INFXRetrieverProcessor(
         rewrite_log_path="results/rerankers/.rewrites/inf-x-retriever.json"
     ),
+    # Retro* (VectorSpaceLab): a generative POINTWISE reranker whose score is
+    # an integer the model writes into a <score> tag, not a logprob - see
+    # RetroStarProcessor for the transcription of their released evaluation
+    # code and for the vendor relevance definition used here (their `aops`
+    # triple, whose query/document shapes are exactly statement-full's).
+    #
+    # The 8B is the size the team's own released BRIGHT scripts run; the 32B
+    # is the largest checkpoint of the family. Tensor parallelism is honored
+    # for both (they are plain vLLM generation, with none of rank1-32b's
+    # score-corruption history), and the 32B WANTS it: this is by far the
+    # most expensive entry in the registry - ~150 candidates x ~1000 queries
+    # x up to 4096 generated tokens, i.e. a full generative pass per PAIR.
+    # Budget it like rank1-32b (--time=3-0, resume-on-timeout) and give it
+    # every GPU on the node.
+    "retro-star-32b": lambda tp: RetroStarProcessor(
+        "ljw13/retro-star-qwen3-32b-0928", tensor_parallel_size=max(1, tp)
+    ),
+    "retro-star-8b": lambda tp: RetroStarProcessor(
+        "ljw13/retro-star-qwen3-8b-0928", tensor_parallel_size=max(1, tp)
+    ),
+    # Reason-Rewriter + Reason-Embed-Qwen3-8B: the BGE-Reasoner "rewrite,
+    # then embed" SYSTEM, standing to reason-embed-qwen3-8b exactly as
+    # inf-x-retriever stands to inf-retriever-v1-pro - same embedding
+    # backend, same prompt-free protocol, so the pair of rows isolates the
+    # rewrite. Five sampled rewrites per query with their embeddings
+    # mean-pooled (the shape of the team's own released rewrite artifact),
+    # made reproducible by per-query-content seeding. Two vLLM engines share
+    # the GPU, so each gets an explicit memory fraction; no tensor
+    # parallelism. See ReasonRewriterProcessor for the full protocol audit.
+    "reason-rewriter-reason-embed-8b": lambda tp: ReasonRewriterProcessor(
+        rewrite_log_path=(
+            "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+        )
+    ),
+    # Same composed system with the LLaMA-3.1 Reason-Embed as the retriever
+    # half, so "does the rewrite help this embedder?" can be asked of both
+    # Reason-Embed checkpoints rather than only the Qwen3 one. Added
+    # 2026-08-28 for the math-vs-word rewritten arm.
+    #
+    # It SHARES the Qwen3 row's rewrite log, which is correct rather than
+    # convenient: the rewriter half, its task string and the recipe
+    # fingerprint are identical, and _load_rewrite_log validates exactly
+    # those three before trusting an entry. Only the embedder differs, and
+    # the log holds no embeddings. So every query the Qwen3 row has already
+    # rewritten is a cache hit here, and the 7B generator never reloads for it.
+    #
+    # max_model_len=40960 mirrors the standalone reason-embed-llama-3.1-8b
+    # spec above; without it vLLM would take llama-3.1's 131072 default and
+    # the two rows would no longer be preprocessing-identical.
+    "reason-rewriter-reason-embed-llama-3.1-8b": (
+        lambda tp: ReasonRewriterProcessor(
+            retriever_name="hanhainebula/reason-embed-llama-3.1-8b-0928",
+            rewrite_log_path=(
+                "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+            ),
+            retriever_init_kwargs={"max_model_len": 40960},
+        )
+    ),
+    # The SAME system with the instruction reaching BOTH halves. On the row
+    # above, --instructions pN only ever reaches the REWRITER: the harness
+    # wraps the instruction into the query text, _rewrite() consumes that
+    # wrapped text, and the query side then embeds the REWRITES - so the
+    # encoder runs prompt-free under every prompt key. This key reapplies the
+    # same wrap to each rewrite just before embedding (via the
+    # embed_instruction kwarg below and
+    # ReasonRewriterProcessor._texts_to_embed), so pN steers the generator AND
+    # the encoder.
+    #
+    # That makes it the missing third arm: standalone reason-embed-qwen3-8b
+    # instructs the ENCODER alone, the plain composed row instructs the
+    # REWRITER alone, and this one instructs both. It shares the plain row's
+    # rewrite log on purpose - the rewriter input is byte-identical between
+    # the two composed arms, so every cached p1/p2 query stays a cache hit and
+    # the delta between the rows isolates the encoder-side instruction alone.
+    # At p0 the two composed rows are the same measurement by construction:
+    # INSTRUCTIONS["p0"] is None, so there is no wrap to reapply.
+    "reason-rewriter-reason-embed-8b-instructed": (
+        lambda tp: ReasonRewriterProcessor(
+            rewrite_log_path=(
+                "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+            )
+        )
+    ),
+    # Reason-Rewriter feeding the RERANKER instead of the retriever: Retro*
+    # scores each pair against the rewritten query rather than the problem
+    # statement. NOT the vendor's cascade - theirs reranks the ORIGINAL query
+    # and uses the rewrite only for retrieval, which on this benchmark's fixed
+    # 150-candidate sets would reproduce retro-star-8b exactly. See
+    # RetroStarRewrittenProcessor before reporting this number.
+    #
+    # It reads the SAME rewrite log the reason-rewriter-reason-embed-8b row
+    # wrote, so every query is a cache hit and the 7B generator never loads.
+    "retro-star-8b-rewritten": lambda tp: RetroStarRewrittenProcessor(
+        "ljw13/retro-star-qwen3-8b-0928",
+        tensor_parallel_size=max(1, tp),
+        rewrite_log_path=(
+            "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+        ),
+    ),
+    # Same rewrite-as-the-reranker's-query construction at 32B. Read the
+    # warning on retro-star-8b-rewritten first: this is NOT the vendor's
+    # cascade, and its number must not be reported as one.
+    #
+    # Two differences from the 8B entry, both because of the size. The
+    # reranker gets 0.85 of the GPU instead of 0.55 - a 32B in bf16 is ~64GB
+    # of weights, and at 0.55 there is almost no KV cache left, which with
+    # ~11k-token prompts (a ~4k-token rewrite plus the document) would leave
+    # one or two candidates in flight. That budget only works because every
+    # rewrite is already cached and the 7B generator never loads, so
+    # require_cached_rewrites makes the alternative a clear error rather than
+    # an OOM. Run this SHARDED like plain retro-star-32b (--query-shards);
+    # longer prompts make it slower per query than that row.
+    "retro-star-32b-rewritten": lambda tp: RetroStarRewrittenProcessor(
+        "ljw13/retro-star-qwen3-32b-0928",
+        tensor_parallel_size=max(1, tp),
+        rewrite_log_path=(
+            "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+        ),
+        gpu_memory_utilization=0.85,
+        require_cached_rewrites=True,
+    ),
 }
 
 # Custom models where --tensor-parallel-size is actually honored (everything
 # else is either pinned to 1 for correctness - rank1-32b - or a single-GPU
 # HF/PyLate call that can't shard at all).
-CUSTOM_MODELS_USE_TP = {"diver-grouprank-32b"}
+CUSTOM_MODELS_USE_TP = {
+    "diver-grouprank-32b",
+    "retro-star-32b",
+    "retro-star-8b",
+    "retro-star-8b-rewritten",
+    "retro-star-32b-rewritten",
+}
 
 # Per-model scores_kwargs for CUSTOM_MODEL_BUILDERS entries (forwarded to
 # processor.get_scores(**scores_kwargs) - see _run_one). The rader family
@@ -552,9 +685,9 @@ CUSTOM_MODEL_SCORES_KWARGS = {
 # VLLMProcessor.from_huggingface passes **kwargs straight through to
 # vllm.LLM(...).
 #
-# All four generics are vLLM-backed since 2026-08-20 (previously only
-# qwen3-embedding-8b was; the other three ran through the auto-detected
-# SentenceTransformers path). The three Qwen3-Embedding derivatives get an
+# Every generic here is vLLM-backed since 2026-08-20 (previously only
+# qwen3-embedding-8b was; the others ran through the auto-detected
+# SentenceTransformers path). The Qwen3-Embedding derivatives get an
 # explicit LAST+normalize pooler override as a plain dict (VLLMProcessor
 # converts it version-tolerantly) - deterministic rather than trusting arch
 # defaults, and verified FEASIBLE against the old ST path (Spearman 0.999-1.0,
@@ -566,6 +699,88 @@ GENERIC_MODELS = {
     "qwen3-embedding-8b": {"model": "Qwen/Qwen3-Embedding-8B", "use_vllm": True},
     "reason-embed-qwen3-8b": {
         "model": "hanhainebula/reason-embed-qwen3-8b-0928",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+        },
+    },
+    # Three more checkpoints from the same Reason-Embed release (0928), added
+    # 2026-08-28 as a backbone/size ablation around reason-embed-qwen3-8b:
+    # "basic" is the same Qwen3-8B backbone trained without the release's
+    # reasoning-augmented data, -qwen3-4b is the size sibling, and
+    # -llama-3.1-8b swaps the backbone at matched size.
+    #
+    # All three are configured IDENTICALLY to reason-embed-qwen3-8b above, on
+    # purpose - an ablation is only readable if preprocessing is identical
+    # across its arms - and the configs justify it: every repo in the family
+    # ships modules.json = [Transformer, Pooling], 1_Pooling with
+    # pooling_mode_lasttoken=true and nothing else, and
+    # similarity_fn_name=cosine, so the explicit LAST+normalize pooler
+    # override is the vendor stack in all four cases.
+    #
+    # No dtype pin, matching the 8B sibling: every one of these repos declares
+    # torch_dtype float32, and vLLM's "auto" downcasts a float32 pooling model
+    # to float16 (_resolve_auto_dtype prefers fp16 for pooling models, then
+    # "Downcasting float32 to float16"), so all four arms land on fp16 without
+    # being told to. This is the SAME situation diver-retriever-0.6b needed a
+    # pin for and the opposite conclusion: there the sibling configs disagreed
+    # (one declared bf16, one declared nothing), here they all agree, so a pin
+    # would only create a split.
+    #
+    # No vendor query envelope either, again matching the 8B sibling.
+    # config_sentence_transformers.json in all four repos declares
+    # prompts.query = "Instruct: Given a query, retrieve documents that can
+    # help answer the query.\nQuery: " with an empty document prompt - that is
+    # exactly the shape the instruction experiment supplies through
+    # INSTRUCTION_TEMPLATES["canonical"], so the production (p0) arm stays
+    # prompt-free here and the prompt is studied there instead.
+    "reason-embed-basic-qwen3-8b": {
+        "model": "hanhainebula/reason-embed-basic-qwen3-8b-0928",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+        },
+    },
+    "reason-embed-qwen3-4b": {
+        "model": "hanhainebula/reason-embed-qwen3-4b-0928",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+        },
+    },
+    # max_model_len is the ONE deliberate difference from its siblings, and it
+    # is result-neutral: this repo is a Llama-3.1 backbone, so its config
+    # advertises 131072 positions where the Qwen3 arms advertise 40960. vLLM
+    # disables chunked prefill for pooling models, so an unpinned 131072 makes
+    # it size max_num_batched_tokens (and the profiling run) for a 131k-token
+    # batch this benchmark can never produce - the longest statement-full
+    # document is 15518 characters (~6k tokens) and p99 is 3896, i.e. nothing
+    # here is truncated at 40960 by either arm. Pinning it to the Qwen3 arms'
+    # window keeps the effective context of the ablation identical too. The
+    # vendor's own BRIGHT script (evaluation_scripts/eval_bright_short.sh in
+    # every repo of the family) truncates at 8192 on both sides, well below
+    # this, so 40960 is not a length the vendor relies on either.
+    "reason-embed-llama-3.1-8b": {
+        "model": "hanhainebula/reason-embed-llama-3.1-8b-0928",
+        "use_vllm": True,
+        "init_kwargs": {
+            "pooler_config": {"pooling_type": "LAST", "normalize": True},
+            "max_model_len": 40960,
+        },
+    },
+    # yale-nlp/RTriever-4B: a Qwen3-Embedding-4B finetune for
+    # reasoning-intensive retrieval. Same architecture family (Qwen3, LAST
+    # pooling, cosine) as the entries above, so it gets the same explicit
+    # pooler override; its repo also ships a 2_Normalize module, which that
+    # override reproduces on the vLLM side. dtype is left to "auto" (the
+    # config declares bfloat16, so no downcast question arises here at all)
+    # and no query prompt is applied: the repo declares the stock
+    # Qwen3-Embedding "Instruct: ...\nQuery:" prompt, and this registry runs
+    # that whole family prompt-free in the production arm (see
+    # qwen3-embedding-8b and the reason-embed block above), with the
+    # instruction dimension studied through --instructions instead.
+    "rtriever-4b": {
+        "model": "yale-nlp/RTriever-4B",
         "use_vllm": True,
         "init_kwargs": {
             "pooler_config": {"pooling_type": "LAST", "normalize": True},
@@ -1116,6 +1331,67 @@ def _select_shard(queries, domains, query_row_idxs, query_shard, query_shards):
     return queries.select(idxs), [domains[i] for i in idxs], global_idxs
 
 
+def _prefetch_if_supported(model, queries, tasks: list[str]) -> None:
+    """Give a processor that can batch its per-query preprocessing the whole
+    query set up front.
+
+    Only reason-rewriter-reason-embed-8b implements prefetch_rewrites today:
+    generating one query's rewrites per call leaves ~5 sequences in flight
+    and runs ~10x slower than one batched call (see
+    ReasonRewriterProcessor's PERFORMANCE note). Purely an optimization -
+    anything not prefetched is still generated on demand - so a processor
+    without the method is simply skipped.
+
+    The --instructions path calls this too, via _instructed_query_texts,
+    which reapplies the instruction wrap per prompt key so the prefetched
+    text is byte-identical to what evaluate() will score for that key. That
+    matters more there than here: an instruction run covers several prompt
+    keys x both query versions, so without a prefetch it would generate
+    thousands of rewrites one query at a time.
+
+    The texts handed over are the EXACT ones evaluate() will score: the same
+    transform() and the same per-task query version (full-full reads the
+    full problem+solution query, the other two read the statement), over the
+    already-subsampled/sharded query set. So an --n smoke test prefetches 20
+    queries, not 1000.
+    """
+    prefetch = getattr(model, "prefetch_rewrites", None)
+    if prefetch is None:
+        return
+    texts, seen = [], set()
+    for task in tasks:
+        for text in transform(queries, "full" if task == "full-full" else "statement"):
+            if text not in seen:
+                seen.add(text)
+                texts.append(text)
+    if texts:
+        prefetch(texts)
+
+
+def _instructed_query_texts(
+    queries, tasks: list[str], query_instruction: str | None, template: str
+) -> list[str]:
+    """The query texts evaluate_task() will actually score for one prompt
+    key, deduplicated across the run's tasks.
+
+    Mirrors evaluate_task: transform() per task's query version, then the
+    same format_instructed_query wrap when an instruction is in play. Only
+    valid for instruction_placement="query" (the non-legacy default) - the
+    legacy path maps the instruction into the problem column BEFORE the
+    transform, so its texts are built differently and callers skip the
+    prefetch there rather than prefetch the wrong strings."""
+    texts, seen = [], set()
+    for task in tasks:
+        version = "full" if task == "full-full" else "statement"
+        for text in transform(queries, version):
+            if query_instruction is not None:
+                text = format_instructed_query(query_instruction, text, template)
+            if text not in seen:
+                seen.add(text)
+                texts.append(text)
+    return texts
+
+
 def _run_one(
     model_key: str,
     save_dir: str,
@@ -1195,6 +1471,7 @@ def _run_one(
 
         if model_key in CUSTOM_MODEL_BUILDERS:
             model = CUSTOM_MODEL_BUILDERS[model_key](tensor_parallel_size)
+            _prefetch_if_supported(model, queries, tasks)
             report, ndcgs = evaluate(
                 model,
                 tasks=tasks,
@@ -1327,6 +1604,23 @@ def _experiment_scores_kwargs(
             )
         }
         kwargs["document_encode_kwargs"] = {"instruction": ""}
+
+    if (
+        not legacy
+        and model_key == "reason-rewriter-reason-embed-8b-instructed"
+        and instruction is not None
+    ):
+        # wrap_instruction stays True: the wrap around the query text is what
+        # instructs the REWRITER, and it is also the rewrite cache key, so
+        # both composed arms hit the same cached rewrites. This kwarg is the
+        # ENCODER half - get_scores reapplies the identical wrap to each
+        # rewrite before embedding. Deliberately NOT an AFFIX_KEYS member:
+        # those are applied by EmbeddingProcessor, and
+        # _assert_envelope_supported would rightly reject one here, since this
+        # processor is a composed ModelProcessor. The template is the
+        # canonical default on both sides; --instruction-template nl2 would
+        # need threading through this function to stay in step.
+        kwargs["embed_instruction"] = instruction
 
     return kwargs, wrap_instruction
 
@@ -1608,6 +1902,17 @@ def _run_one_experiment(
             model = processors[slot]
 
             _assert_envelope_supported(model_key, model, scores_kwargs)
+
+            # Batch any per-query preprocessing for THIS prompt key before
+            # scoring (see _prefetch_if_supported). Skipped under --legacy,
+            # where the instruction goes into the problem column instead of
+            # around the query and these texts would not match.
+            if not legacy and hasattr(model, "prefetch_rewrites"):
+                model.prefetch_rewrites(
+                    _instructed_query_texts(
+                        queries, tasks, query_instruction, instruction_template
+                    )
+                )
 
             report, ndcgs = evaluate(
                 model,

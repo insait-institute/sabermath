@@ -47,7 +47,39 @@ def main() -> None:
         "legacy run; results are written with a __legacy tag so the two "
         "protocols can never overwrite each other.",
     )
+    parser.add_argument(
+        "--query-shards",
+        type=int,
+        default=None,
+        help="Split the targets into N STRIDED shards (i %% N == shard), the "
+        "same split run_rerankers.py's --query-shards uses. Each shard writes "
+        "similarities/<method>[__<arm>]__shard<i>of<N>.json and never touches "
+        "another shard's file, so shards run concurrently - necessary here "
+        "because sim_embeddings rewrites its whole dict after every target "
+        "and two writers on one path clobber each other. Stitch them with "
+        "merge_sim_parts.py. Embedding methods only.",
+    )
+    parser.add_argument(
+        "--query-shard",
+        type=int,
+        default=None,
+        help="Which shard to run, 0-based. Requires --query-shards.",
+    )
     args = parser.parse_args()
+
+    if (args.query_shard is None) != (args.query_shards is None):
+        parser.error("--query-shard and --query-shards must be given together")
+    if args.query_shards is not None and not (0 <= args.query_shard < args.query_shards):
+        parser.error(
+            f"--query-shard must be in [0, {args.query_shards}), "
+            f"got {args.query_shard}"
+        )
+    if args.query_shards is not None and args.force_recalc:
+        parser.error(
+            "--force_recalc with --query-shards would restart the shard from "
+            "target 0; shards resume from their own file by design. Delete the "
+            "shard file instead if you really mean to redo it."
+        )
 
     config_file_path = args.config_file
     method = args.method
@@ -74,8 +106,17 @@ def main() -> None:
             args.force_recalc,
             instruction_key=args.instruction,
             legacy=args.legacy,
+            query_shard=args.query_shard,
+            query_shards=args.query_shards,
         )
-    elif args.instruction is not None or args.legacy:
+    elif args.instruction is not None or args.legacy or args.query_shards is not None:
+        if args.query_shards is not None:
+            raise SystemExit(
+                f"--query-shards is not supported for {method}: the lexical "
+                "methods build their own corpus state per run (tf-idf fits its "
+                "vocabulary on all 150 candidates, approach0 indexes per "
+                "target), so a strided subset is not the same computation."
+            )
         flag = "--instruction" if args.instruction is not None else "--legacy"
         raise SystemExit(
             f"{flag} is not supported for {method}: jaccard/tf-idf/"

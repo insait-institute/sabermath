@@ -39,10 +39,27 @@ PAIRWISE_MODELS = frozenset(
         "diver-grouprank-32b",
         "gte-moderncolbert",
         "reason-moderncolbert",
+        # Retro* and its rewritten-query variants: generative pointwise
+        # rerankers. They emit a score per (query, document) pair from a
+        # <score> tag and have no encode() at all, so the vector path cannot
+        # serve them - the per-query regime through get_scores() is the only
+        # one that exists for this family.
+        "retro-star-8b",
+        "retro-star-32b",
+        "retro-star-8b-rewritten",
+        "retro-star-32b-rewritten",
         "splade-code-0.6b",
         "splade-code-8b",
     }
 )
+# NOT in the set above, deliberately: reason-rewriter-reason-embed-8b was
+# routed through run_pairwise for a while because its QUERY vector is not
+# encode(query) - it is the mean of five rewrites' embeddings - and the vector
+# path would otherwise have measured the bare retriever under the composed
+# model's name. That cost it the all-documents regime, which needs a
+# standalone query vector. It now implements encode_queries(), which the
+# vector path prefers when present, so BOTH regimes are correct for it and
+# nothing has to be special-cased here.
 
 
 def align_rephrased(queries, rephrased):
@@ -188,12 +205,25 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
     processor = rr._build_experiment_processor(
         model_key, "p0", args.tensor_parallel_size, args.save_to, legacy=args.legacy
     )
-    if not isinstance(processor, EmbeddingProcessor):
+    # Duck-typed, not isinstance(EmbeddingProcessor): what this path actually
+    # requires is "one embedding per text", i.e. an encode(). A COMPOSED
+    # processor satisfies that without inheriting from EmbeddingProcessor -
+    # reason-rewriter-reason-embed-8b wraps a vLLM bi-encoder and exposes both
+    # encode() (documents) and encode_queries() (queries, with the rewrite),
+    # and INFXRetrieverProcessor is the same shape. An isinstance check
+    # rejected those for the wrong reason: they are bi-encoders in every sense
+    # this script cares about, they just are not subclasses. A genuine
+    # cross-encoder still has no encode() and is still rejected here, and the
+    # pairwise families never reach this function at all (PAIRWISE_MODELS).
+    if not (
+        isinstance(processor, EmbeddingProcessor)
+        or callable(getattr(processor, "encode", None))
+    ):
         raise SystemExit(
             f"{model_key} is not a bi-encoder: corpus-scale dedup ranking "
             "needs one embedding per text, not one forward pass per "
-            "query-document pair. Only bi-encoders and lexical models are "
-            "supported."
+            "query-document pair. Only models exposing encode() (and lexical "
+            "models) are supported."
         )
 
     scores_kwargs, _ = rr._experiment_scores_kwargs(model_key, None, legacy=args.legacy)
@@ -235,16 +265,35 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
         ),
         dtype=np.float32,
     )
-    print(f"[~] Encoding {len(query_inputs)} queries...")
-    query_emb = np.asarray(
-        processor.encode(
-            query_inputs,
-            show_progress_bar=True,
-            **encode_kwargs,
-            **query_side,
-        ),
-        dtype=np.float32,
-    )
+    # A processor whose query vector is NOT encode(query) - e.g. the
+    # reason-rewriter composition, whose query vector is the mean of its
+    # rewrites' embeddings - exposes encode_queries(). Calling plain encode()
+    # on such a model returns bare-retriever vectors and would report them
+    # under the composed model's name, so prefer the query-aware method
+    # whenever it exists. Models without it are unaffected.
+    encode_queries = getattr(processor, "encode_queries", None)
+    if encode_queries is not None:
+        print(
+            f"[~] Encoding {len(query_inputs)} queries via "
+            f"{type(processor).__name__}.encode_queries (query-side transform applied)..."
+        )
+        query_emb = np.asarray(
+            encode_queries(
+                query_inputs, show_progress_bar=True, **encode_kwargs, **query_side
+            ),
+            dtype=np.float32,
+        )
+    else:
+        print(f"[~] Encoding {len(query_inputs)} queries...")
+        query_emb = np.asarray(
+            processor.encode(
+                query_inputs,
+                show_progress_bar=True,
+                **encode_kwargs,
+                **query_side,
+            ),
+            dtype=np.float32,
+        )
 
     def normalize(m):
         norms = np.linalg.norm(m, axis=1, keepdims=True)
@@ -295,7 +344,10 @@ def run_pairwise(
         model_key, None, legacy=args.legacy
     )
 
-    checkpoint = Path(args.save_to) / ".checkpoints" / f"{model_key}__pairwise.json"
+    checkpoint = (
+        Path(args.save_to) / ".checkpoints"
+        / f"{model_key}__pairwise{getattr(args, 'shard_tag', '')}.json"
+    )
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     per_query = {}
     if checkpoint.exists():
@@ -471,6 +523,18 @@ def main() -> None:
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--n", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--query-shards",
+        type=int,
+        default=None,
+        help="Split the queries into this many strided shards so a slow model "
+        "(the generative rerankers take hours per 1000 queries) can run as N "
+        "concurrent jobs. Each shard keeps its OWN checkpoint and output file; "
+        "stitch them with scripts/merge_dedup_parts.py.",
+    )
+    parser.add_argument(
+        "--query-shard", type=int, default=None, help="Which shard (0-based)."
+    )
     args = parser.parse_args()
 
     queries, documents = load_data()
@@ -487,10 +551,27 @@ def main() -> None:
         f"them, the published protocol) and against the full corpus."
     )
 
+    if (args.query_shards is None) != (args.query_shard is None):
+        raise SystemExit("--query-shards and --query-shard must be used together.")
+    if args.query_shards is not None and not 0 <= args.query_shard < args.query_shards:
+        raise SystemExit(f"--query-shard must be in [0, {args.query_shards - 1}].")
+
     query_idxs = list(range(len(query_texts)))
     if args.n is not None:
         rng = random.Random(args.seed)
         query_idxs = sorted(rng.sample(query_idxs, min(args.n, len(query_idxs))))
+    # Strided, not contiguous - the same split run_rerankers._select_shard
+    # uses, so every shard sees a mix of domains and difficulties rather than
+    # one block of the query list.
+    args.shard_tag = ""
+    if args.query_shards is not None:
+        query_idxs = [
+            r for k, r in enumerate(query_idxs) if k % args.query_shards == args.query_shard
+        ]
+        if not query_idxs:
+            raise SystemExit("That shard selected no queries.")
+        args.shard_tag = f"__shard{args.query_shard}of{args.query_shards}"
+        print(f"[~] Query shard {args.query_shard}/{args.query_shards}: {len(query_idxs)} queries.")
 
     self_pos = {} if args.keep_self_match else self_document_positions(
         queries, documents, doc_ids
@@ -522,6 +603,7 @@ def main() -> None:
         )
 
     subset = "" if args.n is None else f"__n{args.n}_seed{args.seed}"
+    subset = f"{subset}{getattr(args, 'shard_tag', '')}"
     if args.legacy:
         subset = f"{subset}__legacy"
     if args.keep_self_match:

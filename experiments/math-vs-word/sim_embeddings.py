@@ -20,6 +20,8 @@ def calc_embedding_sims(
     force_recalc: bool = False,
     instruction_key: str | None = None,
     legacy: bool = False,
+    query_shard: int | None = None,
+    query_shards: int | None = None,
 ):
 
     PATH_ID = model_id.replace("/", "_")
@@ -30,6 +32,39 @@ def calc_embedding_sims(
         PATH_ID = f"{PATH_ID}__{instruction_key}"
     if legacy:
         PATH_ID = f"{PATH_ID}__legacy"
+
+    # STRIDED target split (i % shards == shard), matching
+    # run_rerankers._select_shard: every shard sees a mix of domains and
+    # difficulties rather than one contiguous block, which matters here
+    # because the targets dataset is domain-ordered and a contiguous block
+    # would hand one shard all the geometry.
+    #
+    # Each shard writes its OWN file and never touches another's, so shards
+    # are safe to run concurrently - which is the whole point, since
+    # sim_embeddings rewrites its entire dict after every target and two
+    # writers on one path would clobber each other. merge_sim_parts.py
+    # stitches them back.
+    if (query_shard is None) != (query_shards is None):
+        raise ValueError("query_shard and query_shards must be given together")
+    if query_shards is not None:
+        if not (0 <= query_shard < query_shards):
+            raise ValueError(
+                f"query_shard must be in [0, {query_shards}), got {query_shard}"
+            )
+        target_idxs = [
+            i for i in range(len(good_targets)) if i % query_shards == query_shard
+        ]
+        if not target_idxs:
+            raise ValueError(
+                f"Shard {query_shard}/{query_shards} selected no targets."
+            )
+        PATH_ID = f"{PATH_ID}__shard{query_shard}of{query_shards}"
+        print(
+            f"[~] Target shard {query_shard}/{query_shards}: "
+            f"{len(target_idxs)} of {len(good_targets)} targets."
+        )
+    else:
+        target_idxs = list(range(len(good_targets)))
 
     print(f"============== {model_id} ==============")
 
@@ -103,7 +138,42 @@ def calc_embedding_sims(
 
     print(f"===========Starting from idx {len(similarities_dict)}===========")
 
-    for _ in tqdm.tqdm(range(len(similarities_dict), len(good_targets))):
+    # Batch any per-query preprocessing before scoring, mirroring
+    # run_rerankers._prefetch_if_supported. Only the composed rewriter rows
+    # implement prefetch_rewrites, and for them this is not an optimization
+    # but a feasibility fix: get_scores() generates a MISSING rewrite one
+    # query at a time, which leaves ~5 sequences in flight and runs ~10x
+    # slower than one batched call (ReasonRewriterProcessor's PERFORMANCE
+    # note). This sweep needs 3 fresh rewrites per target - the full, the
+    # equation-only and the word-only variant, none of which the main
+    # experiment has ever rewritten - so unbatched it is hours per model
+    # rather than minutes.
+    #
+    # The texts handed over are EXACTLY what the loop below will score: the
+    # same as_query() wrap and the same three variants, over the targets not
+    # yet done, so an instructed arm prefetches its own wrapped strings and a
+    # resumed run does not regenerate what it already has.
+    prefetch = getattr(processor, "prefetch_rewrites", None)
+    if prefetch is not None:
+        pending, seen = [], set()
+        # Index one row at a time, exactly as the scoring loop below does.
+        # NOT good_targets[start:] - a datasets.Dataset slices COLUMNAR and
+        # returns dict[str, list], so iterating the slice yields column NAMES
+        # and t[field] raises "string indices must be integers".
+        for i in target_idxs[len(similarities_dict):]:
+            t = good_targets[i]
+            for field in ("problem_fixed", "problem_math_expr", "problem_text_only"):
+                text = as_query(t[field])
+                if text not in seen:
+                    seen.add(text)
+                    pending.append(text)
+        if pending:
+            print(f"[~] Prefetching rewrites for {len(pending)} query texts "
+                  f"in one batched call...")
+            prefetch(pending)
+
+    todo = target_idxs[len(similarities_dict):]
+    for _ in tqdm.tqdm(todo, initial=len(similarities_dict), total=len(target_idxs)):
 
         target = good_targets[_]
         target_id = target["id"]

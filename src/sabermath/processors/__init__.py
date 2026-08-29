@@ -55,3 +55,13 @@ from .rader_reranker_vllm_processor import RaDeRRerankerVLLMProcessor
 # (and the shared, validated ST load recipe for the standalone
 # inf-retriever-v1-pro entry). Heavy deps imported lazily at construction.
 from .infx_retriever_processor import INFXRetrieverProcessor, build_inf_retriever_st
+
+# Retro*: a generative pointwise reranker (vLLM), scored from a <score> tag
+# the model writes rather than from logprobs. vllm/transformers are imported
+# lazily inside _init.
+from .retro_star_processor import RetroStarProcessor, RetroStarRewrittenProcessor
+
+# Reason-Rewriter + Reason-Embed: the BGE-Reasoner "rewrite, then embed"
+# system as one entry, the second composed processor here after
+# INFXRetrieverProcessor. Heavy deps imported lazily inside _init.
+from .reason_rewriter_processor import ReasonRewriterProcessor

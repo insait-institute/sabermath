@@ -3,10 +3,11 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 import multiprocessing as mp
 
 import sabermath
+from sabermath.schemas import Task
 from sabermath.processors import (
     Approach0Processor,
     BM25Processor,
@@ -15,6 +16,9 @@ from sabermath.processors import (
     OpenAIProcessor,
     TfidfProcessor,
 )
+
+
+ALL_TASKS = list(get_args(Task))
 
 
 OPENAI_MODELS = [
@@ -52,9 +56,18 @@ def ensure_dir(path: str | Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def make_output_path(model_name: str, dir: str | Path) -> Path:
+def make_output_path(model_name: str, dir: str | Path, task: str | None = None) -> Path:
+    """Where one run's report lands. A single-task run (--task) writes to its
+    OWN "<model>__<task>.json" rather than the all-tasks "<model>.json",
+    because this script overwrites its output file wholesale - without the
+    suffix, one `--task statement-full` run would silently replace a complete
+    three-task result with a one-task one. Same reasoning (and the same
+    shape) as run_rerankers.py's __n<N>_seed<seed> subset files; that script
+    merges task-by-task into one file instead, which this one has no
+    machinery for."""
     safe = re.sub(r"[^a-zA-Z0-9._-]", "_", model_name)
-    return Path(dir) / f"{safe}.json"
+    suffix = f"__{task}" if task else ""
+    return Path(dir) / f"{safe}{suffix}.json"
 
 
 def normalize_legacy_name(name: str) -> str | None:
@@ -179,12 +192,15 @@ def _run_isolated(
     dcg_variant: str,
     cache: str | None,
     clear_st_default_prompt: bool = False,
+    task: str | None = None,
 ):
+    tasks = [task] if task else None
     try:
         print(f'\n\n[!!]\n\n[~] Running model "{name}"...\n\n[!!]\n\n')
         if clear_st_default_prompt and not use_vllm:
             report = sabermath.evaluate(
                 _load_st_without_default_prompt(name, init_kwargs),
+                tasks=tasks,
                 cache_path=cache,
                 dcg_variant=dcg_variant,
                 scores_kwargs=encode_kwargs,
@@ -193,6 +209,7 @@ def _run_isolated(
         else:
             report = sabermath.evaluate(
                 name,
+                tasks=tasks,
                 use_vllm=use_vllm,
                 cache_path=cache,
                 dcg_variant=dcg_variant,
@@ -207,7 +224,7 @@ def _run_isolated(
             "error": str(e),
         }
 
-    filepath = make_output_path(name, save_dir)
+    filepath = make_output_path(name, save_dir, task)
     ensure_dir(filepath)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
@@ -222,12 +239,15 @@ def _run_processor_isolated(
     encode_kwargs: dict,
     dcg_variant: str,
     cache: str | None,
+    task: str | None = None,
 ):
+    tasks = [task] if task else None
     try:
         print(f'\n\n[!!]\n\n[~] Running model "{label}"...\n\n[!!]\n\n')
         processor = make_api_or_legacy_processor(kind, name, init_kwargs)
         report = sabermath.evaluate(
             processor,
+            tasks=tasks,
             cache_path=cache,
             dcg_variant=dcg_variant,
             scores_kwargs=encode_kwargs,
@@ -244,7 +264,7 @@ def _run_processor_isolated(
             "error": str(e),
         }
 
-    filepath = make_output_path(label, save_dir)
+    filepath = make_output_path(label, save_dir, task)
     ensure_dir(filepath)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
@@ -309,6 +329,16 @@ def main() -> None:
         choices=["vllm", "st"],
         default="st",
         help="Which driver to use for running HuggingFace models (vLLM or SentenceTransformers)",
+    )
+
+    parser.add_argument(
+        "--task",
+        type=str,
+        choices=ALL_TASKS,
+        default=None,
+        help="Run only this task (default: all 3). A single-task run writes "
+        "to results/<model>__<task>.json so it never overwrites an existing "
+        "all-tasks result for the same model.",
     )
 
     parser.add_argument(
@@ -403,6 +433,7 @@ def main() -> None:
                     args.dcg_variant,
                     cache_file,
                     args.clear_st_default_prompt,
+                    args.task,
                 ),
             }
         else:
@@ -417,6 +448,7 @@ def main() -> None:
                     encode_kwargs,
                     args.dcg_variant,
                     cache_file,
+                    args.task,
                 ),
             }
 
@@ -425,7 +457,7 @@ def main() -> None:
         p.join()
 
         if p.exitcode != 0:
-            filepath = make_output_path(spec.label, args.save_to)
+            filepath = make_output_path(spec.label, args.save_to, args.task)
 
             ensure_dir(filepath)
 

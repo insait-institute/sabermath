@@ -133,6 +133,20 @@ declare -A MODEL_ENV_YML=(
   [reason-moderncolbert]="scripts/rerankers/envs/env_colbert.yml"
   [reasonir-8b]="scripts/rerankers/envs/env_reasonir.yml"
   [reason-embed-qwen3-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  # Added 2026-08-28 alongside their measure_query_time.py ALL_BUILDERS
+  # entries. Both take the env their own production launcher in
+  # scripts/rerankers/ uses (run_reason_embed_llama_3.1_8b.slurm and
+  # run_retro_star_32b.slurm both mkenv against env_vllm_feas.yml), which is
+  # the rule the rest of this table follows: time the model in the same
+  # environment the benchmark runs it in.
+  [reason-embed-llama-3.1-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  [retro-star-32b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  # Composed rewrite systems - same env as their production launcher
+  # (run_reason_rewriter_reason_embed_8b.slurm uses env_vllm_feas.yml).
+  [reason-rewriter-reason-embed-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  [reason-rewriter-reason-embed-llama-3.1-8b]="scripts/rerankers/envs/env_vllm_feas.yml"
+  [retro-star-32b-rewritten]="scripts/rerankers/envs/env_vllm_feas.yml"
+  [retro-star-32b-rewritten-uncached]="scripts/rerankers/envs/env_vllm_feas.yml"
   [diver-retriever-4b]="scripts/rerankers/envs/env_vllm_feas.yml"
   [diver-retriever-0.6b]="scripts/rerankers/envs/env_vllm_feas.yml"
   [rader-3b]="scripts/rerankers/envs/env_vllm_feas.yml"
