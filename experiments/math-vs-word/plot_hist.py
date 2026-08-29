@@ -18,25 +18,42 @@ from sim_helpers import get_math_words_tokens
 # ---------------------------------------------------------------------
 
 MODEL_IDS = [
-    "approach0",
-    "Octen/Octen-Embedding-8B",
-    # "Octen/Octen-Embedding-4B",
+    # Ordered by the paper's main results table (tab:statement-full),
+    # best Overall nDCG@10 first, so the legend reads in the same order a
+    # reader just saw there. Qwen3-Reranker-8B has no row in that table and
+    # is seated with its 4B sibling's rank.
+    "reason-rewriter-reason-embed-8b",  # ReasonRewriter + ReasonEmbed-Qwen3-8B
+    "hanhainebula/reason-embed-qwen3-8b-0928",  # ReasonEmbed-Qwen3-8B
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes",  # RaDeR-7B
+    "AQ-MedAI/Diver-Retriever-4B",  # Diver-4B
     "google/gemini-embedding-2",
-    # "Qwen/Qwen3-Embedding-4B",
     "Qwen/Qwen3-Embedding-8B",
+    "google/embeddinggemma-300m",  # Gemma-300m
+    "BAAI/bge-m3",
+    "approach0",
+    "tf-idf",
+    "google-bert/bert-base-uncased",  # BERT (Base)
+    # Dropped 2026-08-29 to make room for the reason family above:
+    # "Octen/Octen-Embedding-8B",
+    # "Qwen/Qwen3-Embedding-0.6B",
+    # "retro-star-32b",  # ReasonReranker-Qwen3-32B
+    # No CROSS-ENCODER RERANKERS on the selected figure as of
+    # 2026-08-29 - the two it had are the two lines above. The
+    # composed ReasonRewriter row that remains is not one: it is a
+    # rewriter feeding an EMBEDDER (type TE in the paper table),
+    # scoring by cosine like every other bi-encoder here.
+    # "qwen3-reranker-8b",
+    # Never in the selected figure - see ALL_MODEL_IDS for the full set:
+    # "Octen/Octen-Embedding-4B",
+    # "Qwen/Qwen3-Embedding-4B",
     # "microsoft/harrier-oss-v1-27b",
     # "google/gemini-embedding-001",
     # "tencent/KaLM-Embedding-Gemma3-12B-2511",
-    "Qwen/Qwen3-Embedding-0.6B",
     # "microsoft/harrier-oss-v1-0.6b",
     # "jinaai/jina-embeddings-v5-text-nano",
-    "google/embeddinggemma-300m",
-    "BAAI/bge-m3",
     # "microsoft/harrier-oss-v1-270m",
-    "tf-idf",
     # "jaccard",
     # "bm25",
-    "google-bert/bert-base-uncased",
     # "FacebookAI/roberta-base",
     # "microsoft/codebert-base",
 ]
@@ -67,13 +84,16 @@ ALL_MODEL_IDS = [
     "bm25",
     "google-bert/bert-base-uncased",
     "FacebookAI/roberta-base",
-    "microsoft/codebert-base",
+    # Dropped 2026-08-29: "microsoft/codebert-base" (CodeBERT). Its
+    # display name, marker and colour stay registered below so the id
+    # can be re-listed here without re-deriving them.
     # --- Added 2026-08-23: the rest of the paper's model table, run via
     # load_models.ADDITIONAL_MODELS. Every id below must match that
     # registry's own strings EXACTLY (model_to_file_stem() just does
     # .replace("/", "_") - no other normalization). ---
     # EMBED
-    "hanhainebula/reason-embed-qwen3-8b-0928",
+    # (reason-embed-qwen3-8b moved to the reason-family block at the end of
+    # this list - see the note there.)
     "AQ-MedAI/Diver-Retriever-4B",
     "AQ-MedAI/Diver-Retriever-0.6B",
     "infly/inf-retriever-v1-pro",
@@ -102,6 +122,26 @@ ALL_MODEL_IDS = [
     "diver-grouprank-32b",
     "lightonai/GTE-ModernColBERT-v1",
     "lightonai/Reason-ModernColBERT",
+    # --- Added 2026-08-29: the reason-family standalone/rewritten pairs.
+    # Each rewritten row is the SAME scorer reading a generated rewrite of
+    # the query instead of the query, so the pair - not either row alone -
+    # is what makes the rewrite's effect on the math/word split readable.
+    # They are short-keyed (not HF-repo-keyed) because three of them are
+    # composed SYSTEMS with no single repo; model_to_file_stem() passes
+    # those through unchanged, which is what similarities/ holds. ---
+    # LIST ORDER IS LEGEND ORDER: ax.legend() takes the handles in the
+    # order the scatter calls were made, i.e. this list, and fills its
+    # columns top-to-bottom. reason-embed-qwen3-8b is therefore listed HERE
+    # rather than in its chronological 2026-08-23 slot - left there it sat
+    # four columns away from the rest of the Reason* family in the legend.
+    # Keep this block contiguous, and keep it short enough to fit one
+    # legend column (currently 5 of 9 rows), or the family splits across a
+    # column break again.
+    "hanhainebula/reason-embed-qwen3-8b-0928",
+    "hanhainebula/reason-embed-llama-3.1-8b-0928",
+    "reason-rewriter-reason-embed-8b",
+    "retro-star-32b",
+    "retro-star-32b-rewritten",
 ]
 
 MATH_TOKEN_RATIO_MODEL_ID = "target_math_token_ratio"
@@ -112,54 +152,82 @@ MATH_TOKEN_RATIO_MODEL_ID = "target_math_token_ratio"
 # ---------------------------------------------------------------------
 
 DEFAULT_MODEL_DISPLAY_NAMES = {
+    # Labels track the paper's main results table (tab:statement-full),
+    # including its capitalization quirks ("Harrier-27b",
+    # "BGE-m3", "Gemma-300m", "LLaMa-Nemotron-8B", "BERT (Base)") - the
+    # figure and the table name the same system the same way or a reader
+    # cannot line them up. Nine models plotted here have no row in that
+    # table; those follow its conventions rather than inventing a style
+    # (hyphenated, size suffix last) and are marked below. One label
+    # deviates from its table row - see the note at the end of this dict.
     "approach0": "Approach Zero",
-    "Octen/Octen-Embedding-8B": "Octen 8B",
-    "Octen/Octen-Embedding-4B": "Octen 4B",
-    "google/gemini-embedding-2": "Gemini 2",
-    "Qwen/Qwen3-Embedding-4B": "Qwen3 4B",
-    "Qwen/Qwen3-Embedding-8B": "Qwen3 8B",
-    "microsoft/harrier-oss-v1-27b": "Harrier 27B",
-    "google/gemini-embedding-001": "Gemini 001",
-    "tencent/KaLM-Embedding-Gemma3-12B-2511": "KaLM Gemma3 12B",
-    "Qwen/Qwen3-Embedding-0.6B": "Qwen3 0.6B",
-    "microsoft/harrier-oss-v1-0.6b": "Harrier 0.6B",
-    "jinaai/jina-embeddings-v5-text-nano": "Jina Nano",
-    "google/embeddinggemma-300m": "Gemma 300M",
-    "BAAI/bge-m3": "BGE-M3",
-    "microsoft/harrier-oss-v1-270m": "Harrier 270M",
+    "Octen/Octen-Embedding-8B": "Octen-8B",
+    "Octen/Octen-Embedding-4B": "Octen-4B",  # not in the table
+    "google/gemini-embedding-2": "Gemini-2",
+    "Qwen/Qwen3-Embedding-4B": "Qwen3-Embedding-4B",
+    "Qwen/Qwen3-Embedding-8B": "Qwen3-Embedding-8B",
+    "microsoft/harrier-oss-v1-27b": "Harrier-27b",
+    "google/gemini-embedding-001": "Gemini-001",
+    "tencent/KaLM-Embedding-Gemma3-12B-2511": "KaLM-12B-2511",
+    "Qwen/Qwen3-Embedding-0.6B": "Qwen3-Embedding-0.6B",
+    "microsoft/harrier-oss-v1-0.6b": "Harrier-0.6b",
+    "jinaai/jina-embeddings-v5-text-nano": "Jina-v5-Nano",
+    "google/embeddinggemma-300m": "Gemma-300m",
+    "BAAI/bge-m3": "BGE-m3",
+    "microsoft/harrier-oss-v1-270m": "Harrier-270m",
     "tf-idf": "TF-IDF",
     "jaccard": "Jaccard",
-    "bm25": "BM-25",
-    "google-bert/bert-base-uncased": "BERT",
+    "bm25": "BM25",
+    "google-bert/bert-base-uncased": "BERT (Base)",
     "FacebookAI/roberta-base": "RoBERTa",
-    "microsoft/codebert-base": "CodeBERT",
-    # --- Added 2026-08-23 ---
-    "hanhainebula/reason-embed-qwen3-8b-0928": "Reason-Embed Qwen3 8B",
-    "AQ-MedAI/Diver-Retriever-4B": "Diver-Retriever 4B",
-    "AQ-MedAI/Diver-Retriever-0.6B": "Diver-Retriever 0.6B",
-    "infly/inf-retriever-v1-pro": "INF-Retriever v1 Pro",
-    "reasonir/ReasonIR-8B": "ReasonIR 8B",
-    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "RaDeR 14B",
-    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "RaDeR 7B",
-    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "RaDeR 3B",
-    "nvidia/llama-embed-nemotron-8b": "LLaMA-Embed Nemotron 8B",
-    "intfloat/multilingual-e5-large": "Multilingual E5 Large",
-    "jinaai/jina-embeddings-v5-text-small": "Jina Small",
-    "text-embedding-3-large": "Text-Embedding-3 Large",
-    "text-embedding-3-small": "Text-Embedding-3 Small",
-    "jhu-clsp/rank1-32b": "Rank1 32B",
-    "jhu-clsp/rank1-7b": "Rank1 7B",
-    "jhu-clsp/rank1-0.5b": "Rank1 0.5B",
+    "microsoft/codebert-base": "CodeBERT",  # not in the table
+    "hanhainebula/reason-embed-qwen3-8b-0928": "ReasonEmbed-Qwen3-8B",
+    "AQ-MedAI/Diver-Retriever-4B": "Diver-4B",
+    "AQ-MedAI/Diver-Retriever-0.6B": "Diver-0.6B",  # not in the table
+    "infly/inf-retriever-v1-pro": "INF-Retriever-v1-Pro",
+    "reasonir/ReasonIR-8B": "ReasonIR-8B",
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "RaDeR-14B",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "RaDeR-7B",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "RaDeR-3B",
+    "nvidia/llama-embed-nemotron-8b": "LLaMa-Nemotron-8B",
+    "intfloat/multilingual-e5-large": "Multilingual-E5-Large",
+    "jinaai/jina-embeddings-v5-text-small": "Jina-v5-Small",
+    "text-embedding-3-large": "Text-Embedding-3-Large",
+    "text-embedding-3-small": "Text-Embedding-3-Small",
+    "jhu-clsp/rank1-32b": "Rank1-32B",
+    "jhu-clsp/rank1-7b": "Rank1-7B",  # not in the table
+    "jhu-clsp/rank1-0.5b": "Rank1-0.5B",  # not in the table
     "inf-x-retriever": "INF-X-Retriever",
-    "qwen3-reranker-8b": "Qwen3-Reranker 8B",
-    "qwen3-reranker-4b": "Qwen3-Reranker 4B",
-    "qwen3-reranker-0.6b": "Qwen3-Reranker 0.6B",
-    "splade-code-8b": "SPLADE-Code 8B",
-    "splade-code-0.6b": "SPLADE-Code 0.6B",
-    "rader-reranker-7b": "RaDeR-Reranker 7B",
-    "diver-grouprank-32b": "Diver-GroupRank 32B",
-    "lightonai/GTE-ModernColBERT-v1": "GTE-ModernColBERT",
-    "lightonai/Reason-ModernColBERT": "Reason-ModernColBERT",
+    "qwen3-reranker-8b": "Qwen3-Reranker-8B",  # not in the table
+    "qwen3-reranker-4b": "Qwen3-Reranker-4B",
+    "qwen3-reranker-0.6b": "Qwen3-Reranker-0.6B",
+    "splade-code-8b": "SPLADE-Code-8B",
+    "splade-code-0.6b": "SPLADE-Code-0.6B",  # not in the table
+    "rader-reranker-7b": "RaDeR-Reranker-7B",  # not in the table
+    "diver-grouprank-32b": "Diver-GroupRank-32B",
+    # The table names Reason-ModernColBERT "Reason-ColBERT"; GTE's sibling
+    # has no row and takes the same shortening.
+    "lightonai/GTE-ModernColBERT-v1": "GTE-ColBERT",  # not in the table
+    "lightonai/Reason-ModernColBERT": "Reason-ColBERT",
+    # --- Added 2026-08-29 ---
+    # NOTE the key "retro-star-*" is the checkpoint's own name
+    # (ljw13/retro-star-qwen3-32b-0928, which is also the similarities/
+    # filename); the paper presents it as ReasonReranker-Qwen3-32B, so the
+    # LABEL follows the paper while the key follows the artifact on disk.
+    "hanhainebula/reason-embed-llama-3.1-8b-0928": "ReasonEmbed-Llama-3.1-8B",
+    # The table's wording verbatim, WRAPPED. A legend box is exactly as
+    # wide as its longest label, and on one line this was 37 characters
+    # against a 20-character field - wide enough that the selected
+    # figure's in-plot legend covered most of the Combinatorics column.
+    # Broken at the "+", the widest line is "ReasonEmbed-Qwen3-8B" (20),
+    # which is the standalone row's label anyway, so this entry no longer
+    # sets the width at all. Costs one line of legend height and keeps the
+    # name exact - matplotlib renders \n in a legend label as two lines.
+    "reason-rewriter-reason-embed-8b": "ReasonRewriter +\nReasonEmbed-Qwen3-8B",
+    "retro-star-32b": "ReasonReranker-Qwen3-32B",
+    # NOT shortened to match: this row is on the --all figure only, which
+    # was asked to stay as it was, so it keeps the table's wording.
+    "retro-star-32b-rewritten": "ReasonRewriter + ReasonReranker-Qwen3-32B",
     MATH_TOKEN_RATIO_MODEL_ID: "Math-token ratio",
 }
 
@@ -247,6 +315,19 @@ DEFAULT_MODEL_MARKER_SYMBOLS = {
     # OpenAI (via OpenRouter) - shares Octen's square
     "text-embedding-3-large": "s",
     "text-embedding-3-small": "s",
+    # --- Added 2026-08-29 ---
+    # Reason-Embed family - all three share the diamond the Qwen3 checkpoint
+    # already carries, so the Qwen3 standalone row and its rewritten
+    # counterpart are the same SHAPE and differ only in shade (see
+    # DEFAULT_MODEL_COLORS). The LLaMA-3.1 checkpoint is plotted standalone
+    # only - there is a reason-rewriter-reason-embed-llama-3.1-8b similarity
+    # file, but it is deliberately not on this figure.
+    "hanhainebula/reason-embed-llama-3.1-8b-0928": "D",
+    "reason-rewriter-reason-embed-8b": "D",
+    # Retro* - shares KaLM's hexagon2, the last shape in the filled
+    # alphabet; the olive/lime pair below is nowhere near KaLM's cyan.
+    "retro-star-32b": "H",
+    "retro-star-32b-rewritten": "H",
 }
 
 # ---------------------------------------------------------------------
@@ -324,6 +405,18 @@ DEFAULT_MODEL_COLORS = {
     # OpenAI (via OpenRouter): indigo
     "text-embedding-3-large": "#1a237e",
     "text-embedding-3-small": "#3949ab",
+    # --- Added 2026-08-29 ---
+    # Standalone/rewritten pairs: SAME hue, DARK = standalone, LIGHT =
+    # rewritten, so the rewrite's effect reads as one marker moving.
+    # Reason-Embed Qwen3 keeps the magenta it already had.
+    "reason-rewriter-reason-embed-8b": "#ea80fc",
+    # Reason-Embed LLaMA: violet - the same purple neighbourhood (same
+    # family) but clearly separable from the magenta above.
+    "hanhainebula/reason-embed-llama-3.1-8b-0928": "#5e35b1",
+    # Retro*: olive/lime, an otherwise unused hue region - the reds are
+    # crowded by RaDeR and rank1, the ambers by ReasonIR and ColBERT.
+    "retro-star-32b": "#827717",
+    "retro-star-32b-rewritten": "#c0ca33",
     # Reference statistic: dashed line color
     MATH_TOKEN_RATIO_MODEL_ID: "#263238",
 }
@@ -554,11 +647,26 @@ def target_math_token_ratio(target: Mapping[str, Any]) -> float:
 # Any OTHER model hitting this is still treated as a real bug (raised
 # below) - an unexpected tie in a continuous-score model is worth
 # investigating, not silently skipping.
+# The 2026-08-29 reason-family additions split cleanly along this same
+# line, confirmed by direct inspection of their similarities/*.json:
+#   - the Reason-Embed rows (the LLaMA-3.1 standalone and the Qwen3
+#     rewritten composite) score with continuous cosine similarities -
+#     1938/1938 distinct values per arm, ZERO ties - so they stay OUT of
+#     this set and an unexpected tie there remains a real bug;
+#   - retro-star-32b and retro-star-32b-rewritten are the opposite case by
+#     construction: Retro* is a GENERATIVE POINTWISE reranker whose score
+#     is an integer 0-100 the model writes into a <score> tag (see
+#     src/sabermath/processors/retro_star_processor.py), so the aggregate
+#     lands on ~400-460 distinct values instead of 1938 and exact ties are
+#     inevitable - 2/969 baseline and 7/969 rewritten, with 1-6 in each
+#     instructed arm.
 MODELS_WITH_EXPECTED_TIES = {
     "jaccard",
     "diver-grouprank-32b",
     "infly/inf-retriever-v1-pro",
     "inf-x-retriever",
+    "retro-star-32b",
+    "retro-star-32b-rewritten",
 }
 
 
@@ -766,8 +874,14 @@ def plot_maths_greater_than_words_points(
             n_scatter_models,
         )
 
-    fig_width = 15 if n_scatter_models <= 12 else 18
-    fig_height = 8 if n_scatter_models <= 12 else 9
+    # The 15x8 canvas assumes tight_layout will run and stretch the axes to
+    # fill it. Under an outside legend it does not (see below), so the axes
+    # keep their default, narrower box - at fontsize 22 the six domain
+    # labels then overlap ("Combinatorics" running into "Geometry"). Give
+    # every outside-legend figure the wider canvas --all already used.
+    small = n_scatter_models <= 12 and not legend_outside
+    fig_width = 15 if small else 18
+    fig_height = 8 if small else 9
     fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=150)
 
     ax.set_facecolor((0.97, 0.97, 0.97))
@@ -899,6 +1013,11 @@ def plot_maths_greater_than_words_points(
     legend.set_zorder(10)
 
     if not legend_outside:
+        # NOT under an outside legend: tight_layout grows the axes box
+        # downward into the gap the legend is anchored in (-0.12 axes
+        # fractions), and the legend then lands on top of the second line
+        # of the two-line domain labels ("and Analysis", "Theory") -
+        # confirmed on both figures.
         plt.tight_layout()
 
     Path("plots").mkdir(parents=True, exist_ok=True)
@@ -993,11 +1112,20 @@ fig, ax = plot_maths_greater_than_words_points(
     marker_symbols=marker_symbols,
     model_colors=model_colors,
     y_min=0.0,
-    legend_fontsize=12 if args.all else 20,
+    legend_fontsize=12 if args.all else 17,
     # --all: wide+shallow (many columns) below the axes, via
     # legend_outside - a tall narrow in-plot legend at this model count
     # would cover real data columns. Selected-models keeps the original
     # single-column in-plot legend.
+    #
+    # NOTE that in-plot legend is a tight fit since the 2026-08-29 rename
+    # to the paper-table labels - they are much longer than the old ones
+    # ("ReasonEmbed-Qwen3-8B-Rewritten" is 30 characters where the old
+    # "Qwen3 8B" was 8), which is why the face is 17 here rather than the
+    # 20 it used to be. If a longer label is ever added and the box starts
+    # covering points again, the fix that keeps the labels readable is
+    # legend_outside=True with legend_ncol=3 (the wider canvas below
+    # follows automatically).
     legend_ncol=6 if args.all else 1,
     legend_outside=args.all,
     output_path=str(Path("plots") / output_filename),
