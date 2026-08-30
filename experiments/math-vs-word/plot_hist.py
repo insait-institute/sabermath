@@ -215,19 +215,26 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     # filename); the paper presents it as ReasonReranker-Qwen3-32B, so the
     # LABEL follows the paper while the key follows the artifact on disk.
     "hanhainebula/reason-embed-llama-3.1-8b-0928": "ReasonEmbed-Llama-3.1-8B",
-    # The table's wording verbatim, WRAPPED. A legend box is exactly as
-    # wide as its longest label, and on one line this was 37 characters
-    # against a 20-character field - wide enough that the selected
-    # figure's in-plot legend covered most of the Combinatorics column.
-    # Broken at the "+", the widest line is "ReasonEmbed-Qwen3-8B" (20),
-    # which is the standalone row's label anyway, so this entry no longer
-    # sets the width at all. Costs one line of legend height and keeps the
-    # name exact - matplotlib renders \n in a legend label as two lines.
-    "reason-rewriter-reason-embed-8b": "ReasonRewriter +\nReasonEmbed-Qwen3-8B",
+    # A rewritten row is named by SUFFIXING its scorer's own label with
+    # "-Rewrite", not by prefixing "ReasonRewriter + ". Both rows read as
+    # the scorer they are - the pair sorts together and differs by one
+    # word at the end, which is what makes the rewrite's effect legible as
+    # one marker moving - and both fit on one line. The earlier prefixed
+    # wording ran to 37 and 41 characters against a 20-character field,
+    # wide enough that the selected figure's in-plot legend covered most
+    # of the Combinatorics column, and the fix for it (breaking at the "+"
+    # so matplotlib renders two lines) cost a line of legend height.
+    # This is also how experiments/rescaling_robustness/results.json names
+    # these two, so the figures and that table agree.
+    #
+    # Still 28 and 32 characters, i.e. wider than the 20-character field
+    # the wrapped form left behind. If the selected figure's in-plot
+    # legend starts covering points again, the fix that keeps the labels
+    # readable is legend_outside=True with legend_ncol=3 (see the call at
+    # the bottom of this file).
+    "reason-rewriter-reason-embed-8b": "ReasonEmbed-Qwen3-8B-Rewrite",
     "retro-star-32b": "ReasonReranker-Qwen3-32B",
-    # NOT shortened to match: this row is on the --all figure only, which
-    # was asked to stay as it was, so it keeps the table's wording.
-    "retro-star-32b-rewritten": "ReasonRewriter + ReasonReranker-Qwen3-32B",
+    "retro-star-32b-rewritten": "ReasonReranker-Qwen3-32B-Rewrite",
     MATH_TOKEN_RATIO_MODEL_ID: "Math-token ratio",
 }
 
