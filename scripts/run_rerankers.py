@@ -1401,6 +1401,7 @@ def _run_one(
     tensor_parallel_size: int,
     progress_every: int,
     legacy: bool = False,
+    save_scores: bool = True,
 ) -> None:
     # Keyed by (model, query-subset) so a checkpoint - or a saved result -
     # from one --n/--seed combination is never mistaken for another subset:
@@ -1480,6 +1481,7 @@ def _run_one(
                 return_ndcgs=True,
                 checkpoint_dir=checkpoint_dir,
                 on_progress=on_progress,
+                save_scores=save_scores,
                 scores_kwargs=_model_scores_kwargs(model_key, legacy=legacy),
             )
         else:
@@ -1508,6 +1510,7 @@ def _run_one(
                 checkpoint_dir=checkpoint_dir,
                 on_progress=on_progress,
                 init_kwargs=init_kwargs,
+                save_scores=save_scores,
                 scores_kwargs=scores_kwargs,
                 **spec,
             )
@@ -2015,10 +2018,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--save-scores",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Persist per-query raw candidate scores and the applied ranking "
-        "to <checkpoint-dir>/<task>.scores.json (requires --instructions; "
-        "use --instructions p0 for baseline score capture).",
+        "to <checkpoint-dir>/<task>.scores.json. ON BY DEFAULT, because a "
+        "ranking is the one thing a finished run cannot reconstruct: nDCG "
+        "under a different gain or relevance rescaling is a pure function of "
+        "it, so keeping it turns an expensive re-run into a CPU-second "
+        "replay. Four rows of the 2026-08-30 rescaling study had to be "
+        "recomputed on GPUs purely because their scores were not kept. Pass "
+        "--no-save-scores to opt out.",
     )
     parser.add_argument(
         "--task",
@@ -2140,12 +2149,6 @@ def main() -> None:
                         "Only --instructions p0 is valid for it."
                     )
     else:
-        if args.save_scores:
-            parser.error(
-                "--save-scores requires --instructions (use --instructions "
-                "p0 for baseline score capture) so it can never resume a "
-                "pre-capture production checkpoint."
-            )
         for model_key in models:
             if (
                 model_key not in CUSTOM_MODEL_BUILDERS
@@ -2188,6 +2191,7 @@ def main() -> None:
                     args.tensor_parallel_size,
                     args.progress_every,
                     args.legacy,
+                    args.save_scores,
                 ),
             )
         else:
