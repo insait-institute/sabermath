@@ -1071,6 +1071,17 @@ INSTRUCTION_EXCLUDED = {
         "the reasonir-8b key (ReasonIRProcessor) for p1/p2/p3; this key "
         "exists only to run p0 on vLLM"
     ),
+    "bm25": (
+        "dropped from the instruction experiment 2026-08-30. BM25 has no "
+        "instruction mechanism - the prompt can only be prepended to the "
+        "query as more query terms - and unlike its two lexical siblings it "
+        "has no pathology that makes the result uninterpretable, so it ran "
+        "and scored 0.4165 -> 0.3568/0.3630/0.3881 on statement-full. "
+        "Reporting one lexical baseline with arms and two without is a "
+        "harness accident, not a distinction, so all three are now excluded "
+        "together and the runs were deleted"
+    ),
+    "bm25-no-tok": ("same reason as bm25"),
     "tf-idf-no-tok": (
         "same reason as tf-idf: a document-fitted vocabulary plus cosine "
         "dilution makes instruction words pure noise"
