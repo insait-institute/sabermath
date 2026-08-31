@@ -58,8 +58,7 @@ def regime_table(cells: dict, regime: str) -> tuple[str, list[str]]:
         for (model_key, cell_regime), payload in cells.items()
         if cell_regime == regime
     ]
-    # Median ties heavily at 1.0, so break ties on the mean - the ordering
-    # is then total and stable across regenerations.
+
     entries.sort(
         key=lambda e: (
             e[1]["insert_per_query"]["median_rank"],

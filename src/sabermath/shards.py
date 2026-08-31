@@ -11,14 +11,8 @@ from .schemas import Branch
 
 BRANCHES = list(get_args(Branch))
 
-# NOT anchored to the end: an evaluation run's name is
-# "<model>__<prompt>[__<subset>][__part-<name>]", so the shard token sits
-# BEFORE any --part-name component. Anchoring it to ".json" silently failed to
-# strip exactly the case sharding is used for - a slow model split by both
-# task and query shard.
 SHARD_RE = re.compile(r"__shard\d+of\d+")
 
-# The rank ladder run_dedup reports coverage at.
 TOP_K_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128]
 
 
@@ -56,12 +50,6 @@ def _write(out: Path, payload: dict) -> None:
     tmp.write_text(json.dumps(payload, indent=2))
     tmp.replace(out)
 
-
-# --------------------------------------------------------------------------
-# nDCG evaluation runs (run_experiments.py)
-# --------------------------------------------------------------------------
-
-
 def load_evaluation_parts(paths: list[Path]) -> tuple[str, list[dict]]:
     parts, model_keys = [], set()
     for p in paths:
@@ -87,10 +75,7 @@ def load_evaluation_parts(paths: list[Path]) -> tuple[str, list[dict]]:
 
 
 def merge_evaluation(model_key: str, parts: list[dict]) -> tuple[dict, dict]:
-    # Global index -> domains, assembled from the parts themselves so this
-    # never needs the dataset.
     domains_by_idx: dict[int, list[str]] = {}
-    # task -> {global index: ndcg}
     ndcgs: dict[str, dict[int, float]] = {}
     owner: dict[tuple[str, int], Path] = {}
 
@@ -162,9 +147,6 @@ def merge_evaluation(model_key: str, parts: list[dict]) -> tuple[dict, dict]:
             "ndcg_at_k": float(sum(valid) / len(valid)) if valid else 0.0,
             "branches": branches,
         }
-        # Same convention as a normal run: n_done/n_total are present ONLY on
-        # an incomplete result, so a partial merge can never be mistaken for a
-        # finished one.
         if len(valid) != n_total:
             entry["n_done"] = len(valid)
             entry["n_total"] = n_total
@@ -233,11 +215,6 @@ def merge_evaluation_shards(
     return True
 
 
-# --------------------------------------------------------------------------
-# Dedup runs (run_dedup.py)
-# --------------------------------------------------------------------------
-
-
 def summarize_ranks(ranks) -> dict:
     arr = np.asarray(ranks, dtype=float)
     out = {
@@ -280,8 +257,6 @@ def merge_dedup(parts: list[tuple[Path, dict]]) -> tuple[dict, list[int]]:
         summarize_ranks(with_all) if all(v is not None for v in with_all) else None
     )
     out["per_query"] = {str(i): merged[str(i)] for i in idxs}
-    # n_self_matches_excluded is a per-shard count of that shard's queries;
-    # summing is correct because the shards partition the query set.
     out["n_self_matches_excluded"] = sum(
         d.get("n_self_matches_excluded", 0) for _, d in parts
     )
@@ -329,11 +304,6 @@ def merge_dedup_shards(
     _write(destination, merged)
     print(f"[+] Wrote {destination}")
     return True
-
-
-# --------------------------------------------------------------------------
-# Shared CLI wiring
-# --------------------------------------------------------------------------
 
 
 def add_merge_arguments(parser, default_dir: str) -> None:
@@ -392,8 +362,6 @@ def run_merge(args, merge_one, directory: Path) -> None:
     written, skipped = 0, []
     for destination, paths in groups.items():
         print(f"--- {destination.name} ---")
-        # One unfinished or malformed group must not abandon the others: a
-        # scan is run over a whole sweep, where some shards are still going.
         try:
             written += merge_one(
                 paths,

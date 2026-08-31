@@ -11,15 +11,7 @@ from ..processors.approach0_processor import build_pya0_index, search_pya0_index
 from . import SIMILARITIES_DIR
 from .embed import get_top5_candidates
 
-# This module used to carry its own copy of the pya0 tokenizer, and the copies
-# had drifted: this one wraps each LaTeX pattern in a capturing group, so the
-# $...$ / \[...\] markers stay INSIDE the tex chunk and pya0 receives
-# "[imath]$x$[/imath]" instead of "[imath]x[/imath]". The processor's variant -
-# the one the benchmark's approach0 rows use - strips them.
-#
-# Set False to adopt the processor's tokenization. That CHANGES the committed
-# results/math_vs_word/similarities/approach0.json numbers, so it is a
-# deliberate decision, not a cleanup.
+# Set False to adopt the processor's tokenization.
 KEEP_DELIMITERS = True
 
 

@@ -8,17 +8,10 @@ from .instructions import INSTRUCTION_KEYS
 
 DEFAULT_RESULTS_DIR = Path("results/evaluation")
 
-# Files that live in the results directory but are not runs.
 _NON_RESULT_FILES = frozenset(
     {"query_sample.json", ".provenance.json", "summary.json"}
 )
 
-# A pre-p0-naming file: "<model>.json", optionally with a subset/shard/part
-# marker but no prompt key. These predate the convention that every run
-# records its arm in its filename; the prompt key is recovered from the
-# payload where it is recorded, and otherwise assumed to be p0 - which is
-# only ever allowed to FILL a cell, never to outrank a canonical run (see
-# run_rank).
 _LEGACY_NAME_RE = re.compile(
     r"^(?P<model>.+?)"
     r"(?:__n(?P<n>\d+)_seed(?P<seed>\d+))?"
@@ -96,8 +89,6 @@ def run_rank(payload: dict) -> int:
         return 0
     prompt = report.get("prompt")
     if not isinstance(prompt, dict):
-        # No prompt block: written before results recorded their protocol,
-        # i.e. before the vendor input envelopes were applied.
         return 0
     return 2 if prompt.get("protocol") == "canonical" else 1
 
@@ -123,8 +114,6 @@ def load_runs(
     for path in sorted(scan.glob("*.json")):
         parsed = parse_result_name(path.stem)
         if parsed is None:
-            # Possibly a pre-p0-naming file. Its arm comes from the payload if
-            # recorded there, else it is taken as p0 at rank 0.
             parsed = parse_unprompted_name(path.stem)
             if parsed is None or path.name in _NON_RESULT_FILES:
                 continue
@@ -134,10 +123,6 @@ def load_runs(
             parsed["part"] is not None or parsed["shard"] is not None
         ):
             continue
-        # The prompt filter is applied AFTER the arm is known: a
-        # pre-p0-naming file carries no prompt key in its name, and its arm is
-        # recovered from the payload below.
-
         try:
             payload = json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
@@ -146,9 +131,6 @@ def load_runs(
         if report is None or ("error" in report and "tasks" not in report):
             continue
 
-        # A pre-p0-naming file carries no prompt key in its name; recover the
-        # arm from the payload, falling back to p0. The prompt filter is
-        # applied here, once the arm is known either way.
         instruction_key = parsed["instruction_key"]
         if instruction_key is None:
             prompt = report.get("prompt")

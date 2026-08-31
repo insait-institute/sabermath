@@ -1,8 +1,3 @@
-# The model roster, display names, markers and colours shared by every
-# figure, so the math-vs-word and latency plots name and colour a model
-# identically. Previously scraped out of the plotting script's source with
-# ast; both figures import it directly now.
-
 ALL_MODEL_IDS = [
     "approach0",
     "Octen/Octen-Embedding-8B",
@@ -24,8 +19,6 @@ ALL_MODEL_IDS = [
     "bm25",
     "google-bert/bert-base-uncased",
     "FacebookAI/roberta-base",
-    # Every id must match load_models' own strings EXACTLY -
-    # model_to_file_stem() only does .replace("/", "_").
     "AQ-MedAI/Diver-Retriever-4B",
     "AQ-MedAI/Diver-Retriever-0.6B",
     "infly/inf-retriever-v1-pro",
@@ -51,11 +44,6 @@ ALL_MODEL_IDS = [
     "diver-grouprank-32b",
     "lightonai/GTE-ModernColBERT-v1",
     "lightonai/Reason-ModernColBERT",
-    # The reason-family standalone/rewritten pairs. Each rewritten row is the
-    # same scorer reading a rewrite of the query, so the PAIR is what makes the
-    # rewrite's effect readable. LIST ORDER IS LEGEND ORDER, and the legend
-    # fills columns top-to-bottom, so keep this block contiguous and short
-    # enough for one column or the family splits across a column break.
     "hanhainebula/reason-embed-qwen3-8b-0928",
     "hanhainebula/reason-embed-llama-3.1-8b-0928",
     "reason-rewriter-reason-embed-8b",
@@ -66,13 +54,9 @@ ALL_MODEL_IDS = [
 MATH_TOKEN_RATIO_MODEL_ID = "target_math_token_ratio"
 
 DEFAULT_MODEL_DISPLAY_NAMES = {
-    # Labels track the paper's main results table, capitalization quirks
-    # included, so the figure and the table name each system identically.
-    # Models with no row there are marked "not in the table" and follow the
-    # same conventions.
     "approach0": "Approach Zero",
     "Octen/Octen-Embedding-8B": "Octen-8B",
-    "Octen/Octen-Embedding-4B": "Octen-4B",  # not in the table
+    "Octen/Octen-Embedding-4B": "Octen-4B",  
     "google/gemini-embedding-2": "Gemini-2",
     "Qwen/Qwen3-Embedding-4B": "Qwen3-Embedding-4B",
     "Qwen/Qwen3-Embedding-8B": "Qwen3-Embedding-8B",
@@ -90,10 +74,10 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     "bm25": "BM25",
     "google-bert/bert-base-uncased": "BERT (Base)",
     "FacebookAI/roberta-base": "RoBERTa",
-    "microsoft/codebert-base": "CodeBERT",  # not in the table
+    "microsoft/codebert-base": "CodeBERT",  
     "hanhainebula/reason-embed-qwen3-8b-0928": "ReasonEmbed-Qwen3-8B",
     "AQ-MedAI/Diver-Retriever-4B": "Diver-4B",
-    "AQ-MedAI/Diver-Retriever-0.6B": "Diver-0.6B",  # not in the table
+    "AQ-MedAI/Diver-Retriever-0.6B": "Diver-0.6B",  
     "infly/inf-retriever-v1-pro": "INF-Retriever-v1-Pro",
     "reasonir/ReasonIR-8B": "ReasonIR-8B",
     "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "RaDeR-14B",
@@ -105,27 +89,19 @@ DEFAULT_MODEL_DISPLAY_NAMES = {
     "text-embedding-3-large": "Text-Embedding-3-Large",
     "text-embedding-3-small": "Text-Embedding-3-Small",
     "jhu-clsp/rank1-32b": "Rank1-32B",
-    "jhu-clsp/rank1-7b": "Rank1-7B",  # not in the table
-    "jhu-clsp/rank1-0.5b": "Rank1-0.5B",  # not in the table
+    "jhu-clsp/rank1-7b": "Rank1-7B",  
+    "jhu-clsp/rank1-0.5b": "Rank1-0.5B", 
     "inf-x-retriever": "INF-X-Retriever",
-    "qwen3-reranker-8b": "Qwen3-Reranker-8B",  # not in the table
+    "qwen3-reranker-8b": "Qwen3-Reranker-8B", 
     "qwen3-reranker-4b": "Qwen3-Reranker-4B",
     "qwen3-reranker-0.6b": "Qwen3-Reranker-0.6B",
     "splade-code-8b": "SPLADE-Code-8B",
-    "splade-code-0.6b": "SPLADE-Code-0.6B",  # not in the table
-    "rader-reranker-7b": "RaDeR-Reranker-7B",  # not in the table
+    "splade-code-0.6b": "SPLADE-Code-0.6B", 
+    "rader-reranker-7b": "RaDeR-Reranker-7B", 
     "diver-grouprank-32b": "Diver-GroupRank-32B",
-    # The table names Reason-ModernColBERT "Reason-ColBERT"; GTE's sibling
-    # has no row and takes the same shortening.
-    "lightonai/GTE-ModernColBERT-v1": "GTE-ColBERT",  # not in the table
+    "lightonai/GTE-ModernColBERT-v1": "GTE-ColBERT", 
     "lightonai/Reason-ModernColBERT": "Reason-ColBERT",
-    # The key is the checkpoint's own name, which is also the filename on
-    # disk; the label follows the paper, which calls it ReasonReranker.
     "hanhainebula/reason-embed-llama-3.1-8b-0928": "ReasonEmbed-Llama-3.1-8B",
-    # A rewritten row SUFFIXES its scorer's label with "-Rewrite" rather than
-    # prefixing the rewriter's name, so the pair sorts together and differs by
-    # one word - which is what makes the rewrite read as one marker moving.
-    # results/rescaling/results.json names them the same way.
     "reason-rewriter-reason-embed-8b": "ReasonEmbed-Qwen3-8B-Rewrite",
     "retro-star-32b": "ReasonReranker-Qwen3-32B",
     "retro-star-32b-rewritten": "ReasonReranker-Qwen3-32B-Rewrite",
@@ -151,51 +127,37 @@ DEFAULT_MODEL_MARKER_SYMBOLS = {
     "jinaai/jina-embeddings-v5-text-nano": "p",
     "BAAI/bge-m3": "8",
     "FacebookAI/roberta-base": "v",
-    # Lexical/string baselines
     "tf-idf": "*",
     "jaccard": "*",
     "bm25": "*",
-    # RaDeR family (Raderspace bi-encoders + its LoRA reranker)
     "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "d",
     "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "d",
     "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "d",
     "rader-reranker-7b": "d",
-    # Diver family (AQ-MedAI retrievers + the groupwise reranker)
     "AQ-MedAI/Diver-Retriever-4B": "<",
     "AQ-MedAI/Diver-Retriever-0.6B": "<",
     "diver-grouprank-32b": "<",
-    # Qwen-architecture derivatives - share Qwen's diamond marker
     "hanhainebula/reason-embed-qwen3-8b-0928": "D",
     "qwen3-reranker-8b": "D",
     "qwen3-reranker-4b": "D",
     "qwen3-reranker-0.6b": "D",
-    # SPLADE (naver)
     "splade-code-8b": "P",
     "splade-code-0.6b": "P",
-    # ColBERT (lightonai)
     "lightonai/GTE-ModernColBERT-v1": "h",
     "lightonai/Reason-ModernColBERT": "h",
-    # matplotlib's filled-shape alphabet (o v ^ < > 8 s p * h H D d P X) is
-    # exhausted above, so these reuse a shape and rely on colour alone. Do NOT
-    # reach for '1'/'2'/'3'/'4'/'+'/'x'/'|'/'_': they are line-only markers,
-    # and every scatter here sets edgecolors="none", which draws NOTHING.
     "jhu-clsp/rank1-32b": ">",
-    "jhu-clsp/rank1-7b": ">",  # shares rank1-32b's triangle_right
-    "jhu-clsp/rank1-0.5b": ">",  # shares rank1-32b's triangle_right
-    "inf-x-retriever": "8",  # shares inf-retriever-v1-pro's octagon
-    "infly/inf-retriever-v1-pro": "8",  # shares BAAI/bge-m3's octagon
-    "nvidia/llama-embed-nemotron-8b": "v",  # shares RoBERTa's triangle_down
-    "intfloat/multilingual-e5-large": "^",  # shares the Google family's triangle_up
-    "reasonir/ReasonIR-8B": "o",  # shares approach0's circle
+    "jhu-clsp/rank1-7b": ">", 
+    "jhu-clsp/rank1-0.5b": ">",
+    "inf-x-retriever": "8",
+    "infly/inf-retriever-v1-pro": "8",
+    "nvidia/llama-embed-nemotron-8b": "v",
+    "intfloat/multilingual-e5-large": "^",  
+    "reasonir/ReasonIR-8B": "o", 
     "jinaai/jina-embeddings-v5-text-small": "p",
-    # OpenAI (via OpenRouter) - shares Octen's square
     "text-embedding-3-large": "s",
     "text-embedding-3-small": "s",
-    # The Reason-Embed family shares one diamond, so a standalone row and its
-    # rewritten counterpart differ only in shade.
     "hanhainebula/reason-embed-llama-3.1-8b-0928": "D",
     "reason-rewriter-reason-embed-8b": "D",
-    # Shares KaLM's hexagon2 - the olive/lime below is far from KaLM's cyan.
     "retro-star-32b": "H",
     "retro-star-32b-rewritten": "H",
 }

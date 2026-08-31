@@ -15,7 +15,6 @@ BRANCH_TO_DOMAIN = {
     "calculus and analysis": "calculus",
 }
 
-# Display name and category, keyed by this repo's model key.
 MODEL_INFO = {
     "reason-embed-qwen3-8b": ("Reason-Embed-Qwen3-8B", "EMBED"),
     "diver-retriever-4b": ("Diver-Retriever-4B", "EMBED"),
@@ -63,9 +62,6 @@ MODEL_INFO = {
     "jaccard": ("Jaccard", "CLASSICAL"),
     "bert-base-uncased": ("BERT", "EMBED"),
     "roberta-base": ("RoBERTa", "EMBED"),
-    # Each lexical method in its own default tokenization, with no
-    # mathematics-aware preprocessing. The paper carries these beside the
-    # math-aware rows in Table 3.
     "bm25-no-tok": ("BM25-no-tok", "CLASSICAL"),
     "tf-idf-no-tok": ("TF-IDF-no-tok", "CLASSICAL"),
     "jaccard-no-tok": ("Jaccard-no-tok", "CLASSICAL"),
@@ -130,11 +126,6 @@ def collect(results_dir=DEFAULT_RESULTS_DIR) -> tuple[dict, dict]:
 
 
 def build_rows(runs: dict, ranks: dict, ci=None) -> list[dict]:
-    """One row per model, from its production run. A run whose recorded
-    protocol is not the current one is NOT given a row: its number came from a
-    configuration this repo no longer runs, and showing it beside current ones
-    would be wrong in a way a reader could not see. Those keys come back in
-    `pending` for the caller to report."""
     ci = ci or {}
     rows, pending = [], []
     for key, (name, category) in MODEL_INFO.items():

@@ -350,9 +350,6 @@ def run_model(
             _checkpoint_dir=checkpoint_dir,
             _counter=progress_counter,
         ) -> None:
-            # Snapshot the checkpoints into the real result file every
-            # `progress_every` freshly-scored queries, so a hard kill loses at
-            # most that many queries rather than the whole run.
             if progress_every <= 0:
                 return
             _counter["n"] += 1
@@ -376,10 +373,6 @@ def run_model(
             model = processors[slot]
 
             assert_envelope_supported(model_key, model, scores_kwargs)
-
-            # Batch per-query preprocessing before scoring: generating one
-            # query's rewrites per call leaves ~5 sequences in flight and runs
-            # ~10x slower than one batched call.
             if hasattr(model, "prefetch_rewrites"):
                 model.prefetch_rewrites(
                     instructed_query_texts(

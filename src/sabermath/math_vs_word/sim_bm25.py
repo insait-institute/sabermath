@@ -34,10 +34,6 @@ def calc_bm25_sims(good_targets: Dataset, good_candidates: Dataset):
             )
             cand_all_tokens_list.append(cand_math_tokens + cand_words_tokens)
 
-        # Same corpus (the 5 candidates, each represented by their full
-        # problem+solution tokens) for all 3 query variants below - mirrors
-        # sim_jaccard.py/sim_tfidf.py, where only the query side changes
-        # between full/math/text and the candidate side is always "full".
         bm25 = BM25Okapi(cand_all_tokens_list)
 
         full_scores = bm25.get_scores(target_all_tokens)
