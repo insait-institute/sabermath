@@ -1,0 +1,31 @@
+# THE shared environment: every model except the four families with
+# conflicting pins (see scripts/run_experiments.py's docstring for which).
+#
+# peft is here for RaDeR's reranker, which ships as a LoRA SEQ_CLS adapter
+# (src/sabermath/processors/rader_reranker_vllm_processor.py). It used to live
+# in a separate env_vllm_feas.yml that was otherwise byte-identical to this
+# file; the two were merged on 2026-08-31.
+#
+# vllm and flashinfer-python are PINNED - confirmed the hard way that
+# leaving them unpinned is not safe: a later env rebuild (fresh conda env,
+# on a machine that has never built this env before) silently pulled vllm
+# 0.27.0, which pulled in a flashinfer-python
+# release incompatible with this Python's typing behavior
+# (flashinfer/comm/fd_exchange.py has a bare `-> tuple[tuple[int, int,
+# array.array[int]]]` return annotation, evaluated eagerly at import time;
+# `array.array` doesn't support that subscript, so *importing* flashinfer
+# crashed with `TypeError: type 'array.array' is not subscriptable` - not a
+# bug in this repo's own code at all). vllm==0.26.0 / flashinfer-python==0.6.14
+# is the last combination confirmed working end-to-end (a real 100+ query
+# rank1-32b run completed cleanly on it). Bump deliberately, not by omission,
+# and re-verify before trusting a bump.
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install numpy datasets transformers "vllm==0.26.0" "flashinfer-python==0.6.14" peft
+  pip install -e "$SABERMATH_REPO"

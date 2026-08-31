@@ -68,7 +68,7 @@ RETRIEVER_QUERY_INSTRUCTION = (
 
 def build_inf_retriever_st(model_name: str = RETRIEVER_REPO):
     """The validated inf-retriever-v1-pro SentenceTransformers load, shared
-    by the standalone benchmark entry (run_rerankers.py's
+    by the standalone benchmark entry (run_experiments.py's
     _build_inf_retriever_processor, where the full rationale lives) and the
     INF-X composition below. Short version of what's load-bearing:
     auto-config load (the repo ships Transformer + lasttoken Pooling +
@@ -136,7 +136,7 @@ class INFXRetrieverProcessor(ModelProcessor):
     keeps its leading space from decoding, and their retrieval embeds
     instruction + that raw text just like we do.
 
-    Rewrites are cached by raw query text: within one run_rerankers.py
+    Rewrites are cached by raw query text: within one run_experiments.py
     process the statement-query set is scored under two tasks
     (statement-statement + statement-full), and the rewrite must be
     generated once and reused - both for cost and so the two tasks see the

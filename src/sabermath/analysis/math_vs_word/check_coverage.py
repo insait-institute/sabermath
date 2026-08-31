@@ -1,7 +1,7 @@
 """Coverage check for the math-vs-word experiment.
 
-    python experiments/math-vs-word/check_coverage.py
-    python experiments/math-vs-word/check_coverage.py --emit-commands
+    python src/sabermath/analysis/math_vs_word/check_coverage.py
+    python src/sabermath/analysis/math_vs_word/check_coverage.py --emit-commands
 
 Answers one question: for every method calc_sims.py can run, is there a
 similarities/<method>.json holding a COMPLETE result?
@@ -21,6 +21,7 @@ import argparse
 import ast
 import json
 from pathlib import Path
+from . import SIMILARITIES_DIR
 
 HERE = Path(__file__).resolve().parent
 EXPECTED_TARGETS = 969  # RAG4Math/targets_fixed_filtered_latex, train split
@@ -34,7 +35,7 @@ NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
 
 def envelope_for(method: str) -> dict | None:
     """The model's canonical vendor input envelope, or None if it cannot be
-    resolved (a non-embedding method, or a model with no run_rerankers key).
+    resolved (a non-embedding method, or a model with no registry key).
 
     Reported for information only. It used to decide whether an instructed
     p0 arm needed its own run, back when the default arm here was
@@ -52,7 +53,7 @@ def envelope_for(method: str) -> dict | None:
 
     sys.path.insert(0, str(HERE))
     try:
-        from load_models import get_scores_kwargs
+        from .load_models import get_scores_kwargs
 
         return dict(get_scores_kwargs(method, "p0"))
     except Exception:
@@ -103,7 +104,7 @@ def allowed_models(path: Path, extra_sources: list[Path]) -> list[str]:
 
     ALLOWED_MODELS is built as ALLOWED_MODELS + ADDITIONAL_MODELS, and
     ADDITIONAL_MODELS references RADER_BIENCODER_MODELS["rader-14b"] and
-    friends, which load_models.py imports from scripts/run_rerankers.py, so
+    friends, which load_models.py imports from scripts/run_experiments.py, so
     that module's literals are evaluated into the same namespace first.
     Without it ADDITIONAL_MODELS silently fails to resolve and the roster
     comes back as just the original 17 - a coverage check that quietly
@@ -150,13 +151,13 @@ def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, st
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sim-dir", type=Path, default=HERE / "similarities")
+    parser.add_argument("--sim-dir", type=Path, default=SIMILARITIES_DIR)
     parser.add_argument("--load-models", type=Path, default=HERE / "load_models.py")
     parser.add_argument(
         "--extra-source",
         type=Path,
         nargs="*",
-        default=[HERE.parent.parent / "scripts" / "run_rerankers.py"],
+        default=[HERE.parent.parent / "scripts" / "run_experiments.py"],
         help="Modules whose top-level literals load_models.py imports.",
     )
     parser.add_argument(
@@ -229,7 +230,7 @@ def main() -> None:
         print(f"  p0 reusable : {len(reusable)}  (p0 IS the default arm - the "
               f"file already on disk is that run)")
         if unknown:
-            print(f"  UNRESOLVED  : {len(unknown)}  (no run_rerankers model key - "
+            print(f"  UNRESOLVED  : {len(unknown)}  (no registry model key - "
                   f"envelope unknown, so p0 cannot be assumed reusable)")
             for method, arm in unknown:
                 print(f"      {method} / {arm}")

@@ -6,39 +6,38 @@ from pathlib import Path
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-# math-vs-word has its own environment.yml, separate from the main
-# sabermath package's - so `import sabermath` isn't guaranteed to resolve
-# without this, same convention as scripts/measure_query_time.py.
+# Kept so this module still imports when the package has not been pip-installed
+# into the active environment - the same convention scripts/run_timing.py uses.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-# Every model here is built and scored through scripts/run_rerankers.py's
-# own functions rather than a second set of recipes - see the block below
+# Every model here is built and scored through the registry's own builders
+# rather than a second set of recipes - see the block below
 # for what that fixed. Importable safely: everything used from it lives
 # below its `if __name__ == "__main__":` guard, so there are no
 # argparse/model-loading side effects at import time.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
-from run_rerankers import RADER_BIENCODER_MODELS  # noqa: E402
+from sabermath.registry import RADER_BIENCODER_MODELS  # noqa: E402
 from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
+from . import SIMILARITIES_DIR
 
 # HOW MODELS ARE BUILT AND CALLED HERE (changed 2026-08-26)
 # --------------------------------------------------------
 # This file no longer maintains its own roster of builders and per-model
 # get_scores kwargs. Every model is built and scored by delegating to
-# scripts/run_rerankers.py's own functions:
+# scripts/run_experiments.py's own functions:
 #
-#     rr._build_experiment_processor(key, instruction_key, tp, save_dir, legacy)
-#     rr._experiment_scores_kwargs(key, instruction_text, legacy)
+#     rr.build_processor(key, instruction_key, tp, save_dir)
+#     rr.prompt_scores_kwargs(key, instruction_text)
 #
 # which is exactly what scripts/run_dedup.py does (run_dedup.py:188-199 and
 # 291-295). The main experiment, the dedup experiment and math-vs-word now go
 # through one code path, so "how do we call this model" has exactly one
 # answer per model, defined in one place.
 #
-# WHY: the parallel roster had drifted badly from run_rerankers.py. It was
+# WHY: the parallel roster had drifted badly from run_experiments.py. It was
 # written when the only models here were the original 17 and the only overlap
-# with run_rerankers was qwen3-embedding-8b in GENERIC_MODELS - the claim the
+# with the registry was qwen3-embedding-8b in GENERIC_MODELS - the claim the
 # old comment here made ("No other model in ALLOWED_MODELS appears in
-# GENERIC_MODELS at all"). run_rerankers.TABLE_MODELS then grew to cover 16 of
+# GENERIC_MODELS at all"). sabermath.registry.TABLE_MODELS then grew to cover 16 of
 # those 17, and this file was never updated, so as of 2026-08-26 it differed
 # from the paper's own harness on:
 #
@@ -73,7 +72,7 @@ from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
 #
 # DO NOT RESURRECT THEM FROM GIT HISTORY. _build_octen_processor was not just
 # unnecessary, it was WRONG. Measured 2026-08-26 on 14 probe texts
-# (scripts/diag_tokenization.py):
+# (see docs/backend-provenance.md):
 #
 #     hand-built stack vs vLLM : cosine 0.704
 #     GENERIC ST load  vs vLLM : cosine 0.99978
@@ -93,37 +92,37 @@ from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
 # which is why the pre-delegation Octen numbers moved +6.60pp when this file
 # started delegating. vLLM is the correct backend for Octen; the old ST
 # numbers were the broken ones. See the octen-embedding-* entry in
-# scripts/run_rerankers.py for the full elimination trail.
+# scripts/run_experiments.py for the full elimination trail.
 #
 # CONSEQUENCE FOR EXISTING RESULTS: every file in similarities/ predates this
 # change and was produced by the old path. The default arm here is now the
-# CANONICAL protocol (legacy=False), the same one run_rerankers.py and
-# run_dedup.py default to; pass --legacy to calc_sims.py to reproduce the old
-# prompt-free numbers, which writes to <method>__legacy.json so the two can
-# never overwrite each other. See scripts/instructions/PROTOCOL.md.
+# CANONICAL protocol - the only one, and the same one run_experiments.py and
+# run_dedup.py use. The pre-2026-08-25 prompt-free variant, and the --legacy
+# flag that selected it, were removed on 2026-08-31, so those numbers are no
+# longer reproducible from this code. See docs/protocol.md.
 #
 # THE ONE EXCEPTION: microsoft/codebert-base is not in the paper's model
-# table and has no run_rerankers.py key, so there is no canonical call for it
+# table and has no run_experiments.py key, so there is no canonical call for it
 # to match. It keeps the generic SentenceTransformers path, and is the only
 # model that does.
 _NO_EXPERIMENT_KEY = {"microsoft/codebert-base"}
 
 # tensor_parallel_size. This module pins CUDA_VISIBLE_DEVICES=0 above, so
-# there is exactly one visible GPU and tp>1 is not expressible. Matches
-# submit_sims.sh, which allocates --gpus=h200:1 per job.
+# there is exactly one visible GPU and tp>1 is not expressible. One
+# math-vs-word method runs per invocation, on one GPU.
 _TENSOR_PARALLEL_SIZE = 1
 
-# Only ever read by run_rerankers' inf-x-retriever builder, which is not in
+# Only ever read by the registry's inf-x-retriever builder, which is not in
 # ALLOWED_MODELS - but _build_experiment_processor takes it unconditionally.
-_SAVE_DIR = str(Path(__file__).resolve().parent / "similarities")
+_SAVE_DIR = str(SIMILARITIES_DIR)
 
 
-# HF repo string -> the short model key scripts/run_rerankers.py uses, built
+# HF repo string -> the short model key scripts/run_experiments.py uses, built
 # by inverting that file's own spec dicts rather than hand-maintaining a
 # second roster here. Every call below goes through this: the model key IS
 # the thing that decides how the model is built and scored.
 def _model_key_by_id() -> dict:
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
     mapping = {}
     for spec_dict in (rr.GENERIC_MODELS, getattr(rr, "TABLE_MODELS", {})):
@@ -141,14 +140,14 @@ def _model_key_by_id() -> dict:
 
 
 def model_key_for(model_id: str) -> str:
-    """The run_rerankers model key for a math-vs-word method id.
+    """The the registry model key for a math-vs-word method id.
 
     Methods that ARE already a short key (the RERANK entries, which have no
     single natural HF repo) map to themselves.
     """
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
-    if model_id in rr.EXPERIMENT_MODEL_KEYS:
+    if model_id in rr.ALL_MODEL_KEYS:
         return model_id
     key = _model_key_by_id().get(model_id)
     if key is None:
@@ -161,11 +160,11 @@ def model_key_for(model_id: str) -> str:
         # outside the paper's table (microsoft/codebert-base) still raises
         # rather than silently resolving to nothing.
         candidate = model_id.rsplit("/", 1)[-1].lower()
-        if candidate in rr.EXPERIMENT_MODEL_KEYS:
+        if candidate in rr.ALL_MODEL_KEYS:
             return candidate
     if key is None:
         raise KeyError(
-            f"{model_id} has no scripts/run_rerankers.py model key, so its "
+            f"{model_id} has no scripts/run_experiments.py model key, so its "
             "input envelope and instruction handling are unknown. Add it to "
             "that file's spec dicts rather than special-casing it here."
         )
@@ -173,7 +172,7 @@ def model_key_for(model_id: str) -> str:
 
 
 def _instruction_args(instruction_key: str | None) -> tuple[str, str | None]:
-    """(instruction_key, instruction_text) as run_rerankers wants them.
+    """(instruction_key, instruction_text) as the registry wants them.
 
     instruction_key=None means this experiment's default arm. It maps to
     "p0", whose INSTRUCTIONS entry is None - i.e. "no instruction text", the
@@ -196,27 +195,24 @@ def _instruction_args(instruction_key: str | None) -> tuple[str, str | None]:
 def get_scores_kwargs(
     model_id: str,
     instruction_key: str | None = None,
-    legacy: bool = False,
 ) -> dict:
     """Every kwarg sim_embeddings.py must forward to processor.get_scores().
 
-    Delegates to run_rerankers._experiment_scores_kwargs, so this is the
+    Delegates to the registry's scores-kwargs builder, so this is the
     same preprocessing protocol (chunk_to_context/context_length) and the
     same vendor input envelope (query_prompt/document_prompt/suffixes/
     per-side API params) the main experiment and run_dedup.py use.
 
-    legacy=True strips the envelope only, reproducing the pre-2026-08-25
-    prompt-free protocol - identical in meaning to run_rerankers.py's and
-    run_dedup.py's own --legacy.
+    prompt-free protocol - identical in meaning to run_experiments.py's and
     """
     if model_id in _NO_EXPERIMENT_KEY:
         return {}
 
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
     key, instruction_text = _instruction_args(instruction_key)
-    kwargs, _ = rr._experiment_scores_kwargs(
-        model_key_for(model_id), instruction_text, legacy=legacy
+    kwargs, _ = rr.prompt_scores_kwargs(
+        model_key_for(model_id), instruction_text
     )
     return kwargs
 
@@ -224,7 +220,6 @@ def get_scores_kwargs(
 def wraps_instruction(
     model_id: str,
     instruction_key: str | None = None,
-    legacy: bool = False,
 ) -> bool:
     """Whether the caller should wrap the query with the generic
     "Instruct: ...\\nQuery: ..." template.
@@ -236,34 +231,34 @@ def wraps_instruction(
         masks exactly those tokens out of the mean pool, so the instruction
         reaches it via query_encode_kwargs, not as query text.
       * the qwen3-reranker family - the instruction fills the model's own
-        <Instruct> slot at construction time (run_rerankers sets
-        query_instruction=None for them, run_rerankers.py:1372-1375).
+        <Instruct> slot at construction time (the registry sets
+        query_instruction=None for them, run_experiments.py:1372-1375).
 
-    The old code here discarded run_rerankers' wrap_instruction flag and
+    The old code here discarded the registry's wrap_instruction flag and
     wrapped unconditionally, which double-applied the instruction for
     reasonir-8b and applied it twice over for the qwen3-rerankers.
     """
     if model_id in _NO_EXPERIMENT_KEY:
         return True
 
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
     key, instruction_text = _instruction_args(instruction_key)
     model_key = model_key_for(model_id)
-    _, wrap = rr._experiment_scores_kwargs(model_key, instruction_text, legacy=legacy)
+    _, wrap = rr.prompt_scores_kwargs(model_key, instruction_text)
     if model_key in rr.QWEN3_RERANKER_REPOS:
         return False
     return wrap
 
 
 def assert_envelope_supported(model_id: str, processor, scores_kwargs: dict) -> None:
-    """run_rerankers' own guard: envelope kwargs are applied by
+    """the registry's own guard: envelope kwargs are applied by
     EmbeddingProcessor.get_scores, so a cross-encoder would silently swallow
     them. Fail loudly instead of scoring with a dropped envelope."""
     if model_id in _NO_EXPERIMENT_KEY:
         return
 
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
     rr._assert_envelope_supported(model_key_for(model_id), processor, scores_kwargs)
 
@@ -271,7 +266,6 @@ def assert_envelope_supported(model_id: str, processor, scores_kwargs: dict) -> 
 def get_model(
     MODEL_ID: str,
     instruction_key: str | None = None,
-    legacy: bool = False,
 ):
     """The processor for MODEL_ID, built exactly as the main experiment and
     run_dedup.py build it.
@@ -285,24 +279,24 @@ def get_model(
     if MODEL_ID in _NO_EXPERIMENT_KEY:
         print(
             f"Loading {MODEL_ID} via SentenceTransformersProcessor."
-            f"from_huggingface (no run_rerankers key - see _NO_EXPERIMENT_KEY)..."
+            f"from_huggingface (no the registry key - see _NO_EXPERIMENT_KEY)..."
         )
         return SentenceTransformersProcessor.from_huggingface(
             MODEL_ID, trust_remote_code=True
         )
 
-    import run_rerankers as rr
+    from sabermath import registry as rr
 
     key, _ = _instruction_args(instruction_key)
     model_key = model_key_for(MODEL_ID)
-    protocol = "legacy" if legacy else "canonical"
+    protocol = "canonical"
     print(
-        f"Loading {MODEL_ID} as run_rerankers model key {model_key!r} "
+        f"Loading {MODEL_ID} as the registry model key {model_key!r} "
         f"(arm {key}, {protocol} protocol) via "
-        f"run_rerankers._build_experiment_processor..."
+        f"the registry's processor builder..."
     )
-    return rr._build_experiment_processor(
-        model_key, key, _TENSOR_PARALLEL_SIZE, _SAVE_DIR, legacy=legacy
+    return rr.build_processor(
+        model_key, key, _TENSOR_PARALLEL_SIZE, _SAVE_DIR
     )
 
 ALLOWED_MODELS = [
@@ -327,7 +321,7 @@ ALLOWED_MODELS = [
 
 # Added 2026-08-22 to cover the rest of the paper's model table beyond the
 # 17 above (which were the original math-vs-word roster). How each one is
-# built and scored is not decided here - it is whatever run_rerankers.py's
+# built and scored is not decided here - it is whatever run_experiments.py's
 # spec dicts say for that model's key, reached via model_key_for(). The two
 # lists differ only in when they were added; they get identical treatment.
 ADDITIONAL_MODELS = [
@@ -343,7 +337,7 @@ ADDITIONAL_MODELS = [
     "nvidia/llama-embed-nemotron-8b",  # LLaMA-Embed-Nemotron-8B
     "intfloat/multilingual-e5-large",  # Multilingual-E5-Large
     "jinaai/jina-embeddings-v5-text-small",  # Jina-v5-Text-Small
-    # API (OpenRouter - run_rerankers.API_MODELS routes these)
+    # API (OpenRouter - sabermath.registry.API_MODELS routes these)
     "text-embedding-3-large",
     "text-embedding-3-small",
     # RERANK
@@ -377,7 +371,7 @@ ADDITIONAL_MODELS = [
     # "already a short key" branch.
     #
     # The three -rewritten rows put the instruction on the REWRITER only:
-    # run_rerankers wraps it into the query text, which is what _rewrite()
+    # the registry wraps it into the query text, which is what _rewrite()
     # consumes, and their query side then embeds/scores the rewrite. That is
     # the default composed behaviour - do NOT substitute
     # reason-rewriter-reason-embed-8b-instructed here, which additionally

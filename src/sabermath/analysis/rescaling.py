@@ -11,7 +11,7 @@ leaderboard moves:
     [0,3] + linear gain
 
 Nothing is re-inferred. nDCG is a pure function of a model's RANKING of the
-candidates, so the rankings dumped by `run_rerankers.py` into
+candidates, so the rankings dumped by `run_experiments.py` into
 `<results>/.checkpoints/<model>/<run>/<task>.scores.json` are enough to
 recompute the metric exactly - `--verify` confirms this by replaying at the
 benchmark's own setting and reproducing the stored per-query nDCG to machine

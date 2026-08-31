@@ -4,13 +4,15 @@ from statistics import mean
 from datasets import Dataset
 from rank_bm25 import BM25Okapi
 
-from embed import get_top5_candidates
-from sim_helpers import get_math_words_tokens
+from .embed import get_top5_candidates
+from .sim_helpers import get_math_words_tokens
+from . import SIMILARITIES_DIR
 
 
 def calc_bm25_sims(good_targets: Dataset, good_candidates: Dataset):
 
-    output_path = "similarities/bm25.json"
+    SIMILARITIES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SIMILARITIES_DIR / "bm25.json"
     similarities_dict = {}
 
     for target in tqdm.tqdm(good_targets):

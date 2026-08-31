@@ -168,7 +168,7 @@ def evaluate_task(
 
     If `checkpoint_path` is given, per-query nDCGs are written to it after
     every query and reloaded from it on entry, so a run interrupted partway
-    (e.g. a SLURM job hitting its wall-clock limit) can be resumed by calling
+    (e.g. a job hitting a wall-clock limit) can be resumed by calling
     evaluate_task() again with the same checkpoint_path instead of losing all
     progress and restarting from query 0. This matters most for slow,
     generative rerankers (e.g. rank1-32b) evaluated over hundreds of queries.
@@ -365,7 +365,7 @@ def evaluate(
     scores_kwargs: dict | None = None,
     # Resume Config: if set, per-query nDCGs are checkpointed to
     # "{checkpoint_dir}/{task}.json" after every query and reloaded from
-    # there on start, so an interrupted run (e.g. a SLURM job timeout) can be
+    # there on start, so an interrupted run (e.g. a job timeout) can be
     # resumed instead of restarting from query 0. Don't reuse a
     # checkpoint_dir across runs with a different queries_ds (e.g. after
     # changing --n / a query subsample) - checkpoints are keyed by query
@@ -374,7 +374,6 @@ def evaluate(
     on_progress: Callable[[], None] | None = None,
     instruction: str | None = None,
     instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE,
-    instruction_placement: Literal["query", "column"] = "query",
     save_scores: bool = False,
     # Printing Config
     verbose: bool = True,
@@ -451,11 +450,6 @@ def evaluate(
         except Exception as e:
             vprint(f"[-] Failed to load cache: {e}")
 
-    if instruction_placement not in ("column", "query"):
-        raise ValueError(
-            f"Invalid instruction_placement: {instruction_placement}"
-        )
-
     query_instruction = None
 
     if instruction is not None:
@@ -465,19 +459,14 @@ def evaluate(
                 "preloaded vector cache only serves the document side."
             )
         vprint(
-            f"[~] Setting instruction ({instruction_placement} placement, "
-            f"{instruction_template} template): {instruction}"
+            f"[~] Setting instruction ({instruction_template} template): "
+            f"{instruction}"
         )
-        if instruction_placement == "column":
-            queries = queries.map(
-                lambda row: {
-                    "problem": format_instructed_query(
-                        instruction, row["problem"], instruction_template
-                    )
-                }
-            )
-        else:
-            query_instruction = instruction
+        # The instruction wraps the QUERY TEXT at scoring time (see
+        # TaskSettings.query_instruction), never the dataset's problem column:
+        # the column route mutated the input before the task transform, so the
+        # same prompt produced different strings per task.
+        query_instruction = instruction
         vprint("[+] Instruction set.")
 
     settings = TaskSettings(

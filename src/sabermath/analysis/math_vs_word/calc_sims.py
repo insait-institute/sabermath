@@ -1,9 +1,11 @@
-from datasets import load_dataset
 import argparse
 import multiprocessing as mp
-import yaml
+from pathlib import Path
 
-from load_models import ALLOWED_MODELS
+import yaml
+from datasets import load_dataset
+
+from .load_models import ALLOWED_MODELS
 
 # Deliberately NOT imported up front: sim_jaccard/sim_tfidf/sim_approach0
 # all pull in pya0 (via sim_helpers.py), and sim_tfidf also needs
@@ -14,16 +16,18 @@ from load_models import ALLOWED_MODELS
 # pya0, before ever reaching bm25's own code). Each is imported only inside
 # the branch that actually needs it, below - same principle as
 # sabermath/processors/__init__.py's own guarded imports for these same
-# three legacy methods.
+# three lexical methods.
+
+
+DEFAULT_CONFIG = Path(__file__).resolve().parent / "config.yaml"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    # Defaulted so the documented bare invocation works:
-    #   sbatch scripts/run_sims.slurm --method jaccard
-    # Every caller runs from experiments/math-vs-word (run_sims.slurm cd's
-    # there), which is where config.yaml lives.
-    parser.add_argument("--config_file", default="config.yaml")
+    # Resolved against this module, not the caller's cwd, so the documented
+    # bare invocation works from anywhere:
+    #   python -m sabermath.analysis.math_vs_word.calc_sims --method jaccard
+    parser.add_argument("--config_file", default=str(DEFAULT_CONFIG))
     parser.add_argument("--method")
     parser.add_argument("--force_recalc", action="store_true")
     parser.add_argument(
@@ -36,23 +40,11 @@ def main() -> None:
         "never overwrites the default file. Embedding methods only.",
     )
     parser.add_argument(
-        "--legacy",
-        action="store_true",
-        help="Reproduce the pre-2026-08-26 protocol: no vendor input "
-        "envelopes (query:/document:, Query:/Document:, RaDeR EOS, "
-        "EmbeddingGemma/jina prompts, Gemini task_type), Qwen3-Reranker on an "
-        "empty <Instruct> slot, ColBERT/GroupRank at their checkpoint "
-        "defaults. Same meaning as run_rerankers.py's and run_dedup.py's own "
-        "--legacy. Every similarities/ file produced before 2026-08-26 is a "
-        "legacy run; results are written with a __legacy tag so the two "
-        "protocols can never overwrite each other.",
-    )
-    parser.add_argument(
         "--query-shards",
         type=int,
         default=None,
         help="Split the targets into N STRIDED shards (i %% N == shard), the "
-        "same split run_rerankers.py's --query-shards uses. Each shard writes "
+        "same split run_experiments.py's --query-shards uses. Each shard writes "
         "similarities/<method>[__<arm>]__shard<i>of<N>.json and never touches "
         "another shard's file, so shards run concurrently - necessary here "
         "because sim_embeddings rewrites its whole dict after every target "
@@ -97,7 +89,7 @@ def main() -> None:
     good_candidates = load_dataset(fixed_candidates_dataset)["train"]
 
     if method in ALLOWED_MODELS:
-        from sim_embeddings import calc_embedding_sims
+        from .sim_embeddings import calc_embedding_sims
 
         calc_embedding_sims(
             method,
@@ -105,11 +97,10 @@ def main() -> None:
             good_candidates,
             args.force_recalc,
             instruction_key=args.instruction,
-            legacy=args.legacy,
             query_shard=args.query_shard,
             query_shards=args.query_shards,
         )
-    elif args.instruction is not None or args.legacy or args.query_shards is not None:
+    elif args.instruction is not None or args.query_shards is not None:
         if args.query_shards is not None:
             raise SystemExit(
                 f"--query-shards is not supported for {method}: the lexical "
@@ -117,32 +108,32 @@ def main() -> None:
                 "vocabulary on all 150 candidates, approach0 indexes per "
                 "target), so a strided subset is not the same computation."
             )
-        flag = "--instruction" if args.instruction is not None else "--legacy"
+        flag = "--instruction"
         raise SystemExit(
             f"{flag} is not supported for {method}: jaccard/tf-idf/"
             "approach0/bm25 have no instruction mechanism and no vendor input "
             "envelope to strip. They are the CONTROL rows of the main "
             "ablation for exactly this reason "
-            "(run_rerankers.INSTRUCTION_CONTROL_REASONS)."
+            "(sabermath.registry.INSTRUCTION_CONTROL_REASONS)."
         )
 
     elif method == "jaccard":
-        from sim_jaccard import calc_jaccard_sims
+        from .sim_jaccard import calc_jaccard_sims
 
         calc_jaccard_sims(good_targets, good_candidates)
 
     elif method == "approach0":
-        from sim_approach0 import calc_approach0_sims
+        from .sim_approach0 import calc_approach0_sims
 
         calc_approach0_sims(good_targets, good_candidates)
 
     elif method == "tf-idf":
-        from sim_tfidf import calc_tfidf_sims
+        from .sim_tfidf import calc_tfidf_sims
 
         calc_tfidf_sims(good_targets, good_candidates)
 
     elif method == "bm25":
-        from sim_bm25 import calc_bm25_sims
+        from .sim_bm25 import calc_bm25_sims
 
         calc_bm25_sims(good_targets, good_candidates)
 
@@ -161,7 +152,7 @@ if __name__ == "__main__":
     # start a new process before the current process has finished its
     # bootstrapping phase." Every OTHER vLLM-backed model in this sweep
     # happened not to trip it, but the underlying hazard was latent for
-    # all of them too. scripts/run_rerankers.py's own main() sets this
+    # all of them too. scripts/run_experiments.py's own main() sets this
     # exact start method for exactly this reason - mirroring it here
     # rather than special-casing just the one model that happened to
     # surface it.

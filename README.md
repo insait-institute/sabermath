@@ -115,21 +115,25 @@ are written to `results/evaluation/<model>__<prompt>.json`, checkpointed after
 every query, so re-running an interrupted command resumes rather than
 restarting.
 
-Most models share one environment, but four families need their own and will
-fail loudly in the wrong one — see the docstring in
-`scripts/run_experiments.py` and the environment files in `scripts/envs/`. In a
-single shared environment, run one model or one same-env family per
-invocation.
+Most models share one environment (`scripts/envs/env_vllm.yml`), but four
+families have conflicting pins, need their own, and fail loudly in the wrong
+one — see [docs/experiment-evaluation.md](docs/experiment-evaluation.md) and
+the files in `scripts/envs/`. In a single environment, run one model or one
+same-env family per invocation.
 
 The other endpoints follow the same shape, each with `--models` defaulting to
 all:
 
-| Endpoint | Experiment |
-|---|---|
-| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms |
-| `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks |
-| `scripts/run_timing.py` | Per-query latency on production backends |
-| `scripts/report_experiments.py` | Regenerates every table into `results/tables/` |
+| Endpoint | Experiment | Write-up |
+|---|---|---|
+| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms | [evaluation](docs/experiment-evaluation.md), [instructions](docs/experiment-instructions.md) |
+| `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | [dedup](docs/experiment-dedup.md) |
+| `scripts/run_timing.py` | Per-query latency on production backends | [latency](docs/experiment-latency.md) |
+| `scripts/report_experiments.py` | Regenerates every table into `results/tables/` | [overview](docs/experiments-overview.md) |
+
+A slow model can be split across concurrent jobs with `--query-shards N
+--query-shard I` and stitched back with `--merge-shards`; see
+[docs/experiment-evaluation.md](docs/experiment-evaluation.md).
 
 ## `build_benchmark/`: recreating the benchmark
 
@@ -166,11 +170,14 @@ it depends on, and every result lives under one `results/` root.
 | `src/sabermath/results.py` | Reading `results/`: filename grammar and protocol precedence |
 | `src/sabermath/reporting/` | Table generators, one module per table |
 | `src/sabermath/analysis/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, latency and math-vs-word figures, benchmark composition |
-| `scripts/` | The four run endpoints, the report endpoint, and cluster launchers |
-| `scripts/slurm/`, `scripts/envs/` | SLURM job files and per-family conda environments |
-| `scripts/diagnostics/` | Backend-equivalence and input-format sweeps |
+| `src/sabermath/shards.py` | Splitting one run across jobs, and stitching it back |
+| `scripts/` | The four endpoints, and nothing else |
+| `scripts/envs/` | The five conda environments, one per conflicting pin set |
 | `results/` | Every result (see below) |
-| `docs/` | Protocol notes and per-experiment write-ups |
+| `docs/` | Per-experiment write-ups and protocol notes (see [Documentation](#documentation)) |
+
+There are no job files and no submit scripts. Run an endpoint directly, in the
+environment that model family needs.
 
 ### `results/`
 
@@ -193,6 +200,23 @@ directory it sits in. Regenerate every table with:
 ```bash
 python scripts/report_experiments.py
 ```
+
+## Documentation
+
+[`docs/experiments-overview.md`](docs/experiments-overview.md) is the index: it
+maps every experiment to its endpoint, its write-up and its output directory.
+
+| Document | What it covers |
+|---|---|
+| [experiments-overview.md](docs/experiments-overview.md) | The index — start here |
+| [experiment-evaluation.md](docs/experiment-evaluation.md) | Running an nDCG sweep: environments, sharding, resuming, output naming |
+| [protocol.md](docs/protocol.md) | What each model actually receives: input envelopes, instruction templates, placement |
+| [backend-provenance.md](docs/backend-provenance.md) | Why each model is served on the backend it is, and what that was checked against |
+| [build_benchmark/README.md](build_benchmark/README.md) | Recreating the benchmark from the raw corpus |
+
+The remaining `docs/experiment-*.md` files cover one experiment each. Every
+document in `docs/` is there to reproduce something; the working notes from
+the 2026-08-25 protocol change were removed on 2026-08-31.
 
 ## License
 

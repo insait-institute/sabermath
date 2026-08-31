@@ -43,13 +43,6 @@ lexical = [
     "pya0==0.3.7; platform_system == 'Linux'"
 ]
 
-# Deprecated alias for "lexical", kept so existing install commands and
-# cluster environment files keep working. These baselines were never legacy in
-# the sense the name suggested - they are reported in the paper.
-legacy = [
-    "sabermath[lexical]"
-]
-
 # Custom-scoring rerankers (rank1, Qwen3-Reranker, GTE/Reason-ModernColBERT,
 # ReasonIR, SPLADE) - see src/sabermath/processors/. rank1 additionally needs
 # the "vllm" extra; ReasonIR and SPLADE only need the base dependencies plus

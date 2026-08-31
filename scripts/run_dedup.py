@@ -1,3 +1,31 @@
+#!/usr/bin/env python3
+"""Deduplication: where does an LLM-rephrased copy of a query's own problem
+rank when inserted into the corpus? THE endpoint for the dedup experiment.
+
+    # every eligible model
+    python scripts/run_dedup.py
+
+    # a subset
+    python scripts/run_dedup.py --models bge-m3 qwen3-embedding-8b
+
+    # smoke test
+    python scripts/run_dedup.py --models bge-m3 --n 20
+
+TWO REGIMES, computed from the same embeddings in one pass, answering
+different questions - never merge them into one table:
+
+  per-query-candidates  the PUBLISHED protocol. The copy competes against
+                        that query's own 150 candidates, ranked among 151.
+                        Every model can run this.
+  all-documents         the copy competes against all 71,117 documents. Much
+                        harder, no published reference. Bi-encoders and
+                        lexical models only - a pair scorer would need 71,117
+                        forward passes per query.
+
+Results land in results/dedup/. Read them with scripts/report_experiments.py.
+A sharded sweep is stitched back together with --merge-shards.
+"""
+
 import argparse
 import json
 import random
@@ -7,10 +35,9 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import run_rerankers as rr
+from sabermath import registry as rr
 
 from sabermath.benchmark import transform
 from sabermath.data import load_data
@@ -19,6 +46,7 @@ from sabermath.processors.embedding_processor import (
     apply_affixes,
     split_affix_kwargs,
 )
+from sabermath.shards import add_merge_arguments, merge_dedup_shards, run_merge
 
 DEFAULT_REPHRASED_DATASET = "RAG4Math/targets-with-rephrased"
 TOP_K_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128]
@@ -60,6 +88,15 @@ PAIRWISE_MODELS = frozenset(
 # standalone query vector. It now implements encode_queries(), which the
 # vector path prefers when present, so BOTH regimes are correct for it and
 # nothing has to be special-cased here.
+
+
+DEDUP_EXCLUDED = {
+    "approach0": (
+        "cannot run the dedup experiment - its _BROKEN_QUERIES md5 skip-list "
+        "is keyed to raw benchmark query text, so a rephrased insertion "
+        "reintroduces known segfaults"
+    ),
+}
 
 
 def align_rephrased(queries, rephrased):
@@ -202,8 +239,8 @@ def summarize(ranks: list[int]) -> dict:
 
 
 def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, query_idxs, self_pos, restrict):
-    processor = rr._build_experiment_processor(
-        model_key, "p0", args.tensor_parallel_size, args.save_to, legacy=args.legacy
+    processor = rr.build_processor(
+        model_key, "p0", args.tensor_parallel_size, args.save_to
     )
     # Duck-typed, not isinstance(EmbeddingProcessor): what this path actually
     # requires is "one embedding per text", i.e. an encode(). A COMPOSED
@@ -226,7 +263,7 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
             "models) are supported."
         )
 
-    scores_kwargs, _ = rr._experiment_scores_kwargs(model_key, None, legacy=args.legacy)
+    scores_kwargs, _ = rr.prompt_scores_kwargs(model_key, None)
     # This script encodes whole corpora up front rather than going through
     # get_scores per query, so the per-side envelope has to be applied here:
     # the affix keys are get_scores parameters and would raise as unknown
@@ -337,12 +374,10 @@ def run_pairwise(
             "corpus would need one forward pass per document per query."
         )
 
-    processor = rr._build_experiment_processor(
-        model_key, "p0", args.tensor_parallel_size, args.save_to, legacy=args.legacy
+    processor = rr.build_processor(
+        model_key, "p0", args.tensor_parallel_size, args.save_to
     )
-    scores_kwargs, _ = rr._experiment_scores_kwargs(
-        model_key, None, legacy=args.legacy
-    )
+    scores_kwargs, _ = rr.prompt_scores_kwargs(model_key, None)
 
     checkpoint = (
         Path(args.save_to) / ".checkpoints"
@@ -394,7 +429,7 @@ def run_lexical(model_key, args, corpus_texts, rephrased_texts, query_texts, que
     """Lexical dedup.
 
     The three lexical families each come in two tokenizer variants, exactly
-    as in run_rerankers.LEXICAL_MODEL_BUILDERS: the default keys tokenize
+    as in sabermath.registry.LEXICAL_MODEL_BUILDERS: the default keys tokenize
     with Approach Zero's operator-tree tokenizer over the LaTeX blocks plus
     lowercased prose words, and the "-no-tok" keys use the plain-text
     fallback (lowercase + whitespace split for BM25/Jaccard, sklearn's own
@@ -483,129 +518,35 @@ def run_lexical(model_key, args, corpus_texts, rephrased_texts, query_texts, que
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, choices=rr.EXPERIMENT_MODEL_KEYS)
-    parser.add_argument("--rephrased", type=str, default=DEFAULT_REPHRASED_DATASET)
-    parser.add_argument(
-        "--doc-version", choices=["statement", "full"], default="statement"
-    )
-    parser.add_argument(
-        "--query-version", choices=["statement", "full"], default="statement"
-    )
-    parser.add_argument(
-        "--corpus",
-        choices=["both", "per-query-candidates", "all-documents"],
-        default="both",
-        help="Which regime(s) to write out. per-query-candidates is the "
-        "PUBLISHED protocol: the copy is inserted into that query's own 150 "
-        "candidates and ranked among 151. all-documents ranks it against all "
-        "71,117 documents - a far harder question with no published "
-        "reference. Both are computed from the SAME embeddings in one pass, "
-        "so 'both' (the default) costs no more than either alone.",
-    )
-    parser.add_argument("--save-to", type=str, default="results/dedup")
-    parser.add_argument(
-        "--keep-self-match",
-        action="store_true",
-        help="Do NOT exclude each query's own original document from the "
-        "corpus. 92.8%% of query problems appear verbatim among the "
-        "documents, so leaving them in measures exact-duplicate retrieval "
-        "instead of rephrase retrieval - see self_document_positions().",
-    )
-    parser.add_argument(
-        "--legacy",
-        action="store_true",
-        help="Encode without the vendor input envelope, matching the "
-        "co-author's published dedup rows. Use it to reproduce those first "
-        "(Octen-8B avg rank 6.85, BM25 24.09) before trusting new numbers.",
-    )
-    parser.add_argument("--tensor-parallel-size", type=int, default=1)
-    parser.add_argument("--n", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--query-shards",
-        type=int,
-        default=None,
-        help="Split the queries into this many strided shards so a slow model "
-        "(the generative rerankers take hours per 1000 queries) can run as N "
-        "concurrent jobs. Each shard keeps its OWN checkpoint and output file; "
-        "stitch them with scripts/merge_dedup_parts.py.",
-    )
-    parser.add_argument(
-        "--query-shard", type=int, default=None, help="Which shard (0-based)."
-    )
-    args = parser.parse_args()
-
-    queries, documents = load_data()
-    rephrased = load_dataset(args.rephrased, split="train")
-
-    corpus_texts, rephrased_texts, query_texts, doc_ids, restrict = build_texts(
-        queries, documents, rephrased, args.doc_version, args.query_version, args.corpus
-    )
-    sizes = {len(r) for r in restrict}
-    print(
-        f"[+] {len(corpus_texts)} documents encoded ({args.doc_version} "
-        f"version) + {len(rephrased_texts)} rephrased insertions. Ranked both "
-        f"among each query's own candidates ({min(sizes)}-{max(sizes)} of "
-        f"them, the published protocol) and against the full corpus."
-    )
-
-    if (args.query_shards is None) != (args.query_shard is None):
-        raise SystemExit("--query-shards and --query-shard must be used together.")
-    if args.query_shards is not None and not 0 <= args.query_shard < args.query_shards:
-        raise SystemExit(f"--query-shard must be in [0, {args.query_shards - 1}].")
-
-    query_idxs = list(range(len(query_texts)))
-    if args.n is not None:
-        rng = random.Random(args.seed)
-        query_idxs = sorted(rng.sample(query_idxs, min(args.n, len(query_idxs))))
-    # Strided, not contiguous - the same split run_rerankers._select_shard
-    # uses, so every shard sees a mix of domains and difficulties rather than
-    # one block of the query list.
-    args.shard_tag = ""
-    if args.query_shards is not None:
-        query_idxs = [
-            r for k, r in enumerate(query_idxs) if k % args.query_shards == args.query_shard
-        ]
-        if not query_idxs:
-            raise SystemExit("That shard selected no queries.")
-        args.shard_tag = f"__shard{args.query_shard}of{args.query_shards}"
-        print(f"[~] Query shard {args.query_shard}/{args.query_shards}: {len(query_idxs)} queries.")
-
-    self_pos = {} if args.keep_self_match else self_document_positions(
-        queries, documents, doc_ids
-    )
-    print(
-        f"[+] Self-match exclusion: "
-        + (
-            "OFF (--keep-self-match)"
-            if args.keep_self_match
-            else f"{len(self_pos)}/{len(query_texts)} queries have their own "
-            "original document in the corpus; it is excluded as a competitor"
-        )
-    )
-
-    if args.model in PAIRWISE_MODELS:
+def run_one_model(
+    model_key: str,
+    args,
+    corpus_texts,
+    rephrased_texts,
+    query_texts,
+    query_idxs,
+    self_pos,
+    restrict,
+) -> None:
+    """One model's full dedup measurement, written out per regime."""
+    if model_key in PAIRWISE_MODELS:
         per_query = run_pairwise(
-            args.model, args, corpus_texts, rephrased_texts, query_texts,
+            model_key, args, corpus_texts, rephrased_texts, query_texts,
             query_idxs, self_pos, restrict,
         )
-    elif args.model in rr.LEXICAL_MODEL_BUILDERS:
+    elif model_key in rr.LEXICAL_MODEL_BUILDERS:
         per_query = run_lexical(
-            args.model, args, corpus_texts, rephrased_texts, query_texts,
+            model_key, args, corpus_texts, rephrased_texts, query_texts,
             query_idxs, self_pos, restrict,
         )
     else:
         per_query = run_embedding(
-            args.model, args, corpus_texts, rephrased_texts, query_texts,
+            model_key, args, corpus_texts, rephrased_texts, query_texts,
             query_idxs, self_pos, restrict,
         )
 
     subset = "" if args.n is None else f"__n{args.n}_seed{args.seed}"
     subset = f"{subset}{getattr(args, 'shard_tag', '')}"
-    if args.legacy:
-        subset = f"{subset}__legacy"
     if args.keep_self_match:
         subset = f"{subset}__selfmatch"
 
@@ -618,7 +559,7 @@ def main() -> None:
 
     for regime in regimes:
         if regime not in available:
-            print(f"[~] {regime}: not available for {args.model} - skipped.")
+            print(f"[~] {regime}: not available for {model_key} - skipped.")
             continue
 
         # len(self_pos) counts queries whose own document exists ANYWHERE in
@@ -640,9 +581,9 @@ def main() -> None:
         with_all = [per_query[i][regime][1] for i in query_idxs]
 
         out = {
-            "model": args.model,
+            "model": model_key,
             "regime": regime,
-            "protocol": "legacy" if args.legacy else "canonical",
+            "protocol": "canonical",
             "exclude_self_match": not args.keep_self_match,
             "n_self_matches_excluded": n_excluded,
             "rephrased_dataset": args.rephrased,
@@ -674,11 +615,11 @@ def main() -> None:
         }
 
         tag = "" if regime == "per-query-candidates" else "__all-documents"
-        out_path = Path(args.save_to) / f"{args.model}{tag}{subset}.json"
+        out_path = Path(args.save_to) / f"{model_key}{tag}{subset}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(out, indent=2))
 
-        print(f"\n=== {args.model} dedup ranking [{regime}] ===")
+        print(f"\n=== {model_key} dedup ranking [{regime}] ===")
         for mode in ("insert_per_query", "insert_all_rephrased"):
             m = out[mode]
             if m is None:
@@ -692,6 +633,163 @@ def main() -> None:
                 f"max={m['max_rank']:.0f})\n    {tops}"
             )
         print(f"[+] Wrote {out_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        metavar="KEY",
+        default=None,
+        help="Models to run (default: every model that can do dedup - all "
+        "bi-encoders, lexical baselines and pair scorers in the registry).",
+    )
+    parser.add_argument("--rephrased", type=str, default=DEFAULT_REPHRASED_DATASET)
+    parser.add_argument(
+        "--doc-version", choices=["statement", "full"], default="statement"
+    )
+    parser.add_argument(
+        "--query-version", choices=["statement", "full"], default="statement"
+    )
+    parser.add_argument(
+        "--corpus",
+        choices=["both", "per-query-candidates", "all-documents"],
+        default="both",
+        help="Which regime(s) to write out. per-query-candidates is the "
+        "PUBLISHED protocol: the copy is inserted into that query's own 150 "
+        "candidates and ranked among 151. all-documents ranks it against all "
+        "71,117 documents - a far harder question with no published "
+        "reference. Both are computed from the SAME embeddings in one pass, "
+        "so 'both' (the default) costs no more than either alone.",
+    )
+    parser.add_argument("--save-to", type=str, default="results/dedup")
+    parser.add_argument(
+        "--keep-self-match",
+        action="store_true",
+        help="Do NOT exclude each query's own original document from the "
+        "corpus. 92.8%% of query problems appear verbatim among the "
+        "documents, so leaving them in measures exact-duplicate retrieval "
+        "instead of rephrase retrieval - see self_document_positions().",
+    )
+    parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--n", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--query-shards",
+        type=int,
+        default=None,
+        help="Split the queries into this many strided shards so a slow model "
+        "(the generative rerankers take hours per 1000 queries) can run as N "
+        "concurrent jobs. Each shard keeps its OWN checkpoint and output file; "
+        "stitch them back with --merge-shards.",
+    )
+    parser.add_argument(
+        "--query-shard", type=int, default=None, help="Which shard (0-based)."
+    )
+    add_merge_arguments(parser, "results/dedup")
+    args = parser.parse_args()
+
+    # Before load_data(): merging is pure JSON arithmetic over finished runs.
+    if args.merge_shards is not None:
+        run_merge(args, merge_dedup_shards, Path(args.save_to))
+        return
+
+    queries, documents = load_data()
+    rephrased = load_dataset(args.rephrased, split="train")
+
+    corpus_texts, rephrased_texts, query_texts, doc_ids, restrict = build_texts(
+        queries, documents, rephrased, args.doc_version, args.query_version, args.corpus
+    )
+    sizes = {len(r) for r in restrict}
+    print(
+        f"[+] {len(corpus_texts)} documents encoded ({args.doc_version} "
+        f"version) + {len(rephrased_texts)} rephrased insertions. Ranked both "
+        f"among each query's own candidates ({min(sizes)}-{max(sizes)} of "
+        f"them, the published protocol) and against the full corpus."
+    )
+
+    if (args.query_shards is None) != (args.query_shard is None):
+        raise SystemExit("--query-shards and --query-shard must be used together.")
+    if args.query_shards is not None and not 0 <= args.query_shard < args.query_shards:
+        raise SystemExit(f"--query-shard must be in [0, {args.query_shards - 1}].")
+
+    query_idxs = list(range(len(query_texts)))
+    if args.n is not None:
+        rng = random.Random(args.seed)
+        query_idxs = sorted(rng.sample(query_idxs, min(args.n, len(query_idxs))))
+    # Strided, not contiguous - the same split run_experiments uses (see
+    # sabermath.runner.select_shard), so every shard sees a mix of domains
+    # and difficulties rather than one block of the query list.
+    args.shard_tag = ""
+    if args.query_shards is not None:
+        query_idxs = [
+            r for k, r in enumerate(query_idxs) if k % args.query_shards == args.query_shard
+        ]
+        if not query_idxs:
+            raise SystemExit("That shard selected no queries.")
+        args.shard_tag = f"__shard{args.query_shard}of{args.query_shards}"
+        print(f"[~] Query shard {args.query_shard}/{args.query_shards}: {len(query_idxs)} queries.")
+
+    self_pos = {} if args.keep_self_match else self_document_positions(
+        queries, documents, doc_ids
+    )
+    print(
+        f"[+] Self-match exclusion: "
+        + (
+            "OFF (--keep-self-match)"
+            if args.keep_self_match
+            else f"{len(self_pos)}/{len(query_texts)} queries have their own "
+            "original document in the corpus; it is excluded as a competitor"
+        )
+    )
+
+    # Every model can do dedup EXCEPT approach0: its _BROKEN_QUERIES md5
+    # skip-list is keyed to raw benchmark query text, and a rephrased
+    # insertion is not in it, so it would segfault on the very rows this
+    # experiment is about.
+    eligible = [k for k in rr.ALL_MODEL_KEYS if k not in DEDUP_EXCLUDED]
+    models = args.models or eligible
+    excluded = [m for m in models if m in DEDUP_EXCLUDED]
+    if excluded:
+        raise SystemExit(
+            "; ".join(f"{m}: {DEDUP_EXCLUDED[m]}" for m in excluded)
+        )
+    unknown = [m for m in models if m not in rr.ALL_MODEL_KEYS]
+    if unknown:
+        raise SystemExit(
+            f"Unknown model key(s): {', '.join(unknown)}. "
+            "See scripts/run_experiments.py --list for the available keys."
+        )
+
+    failures = []
+    for i, model_key in enumerate(models, start=1):
+        print("\n" + "#" * 60)
+        print(f"# dedup: {model_key} ({i}/{len(models)})")
+        print("#" * 60)
+        try:
+            run_one_model(
+                model_key,
+                args,
+                corpus_texts,
+                rephrased_texts,
+                query_texts,
+                query_idxs,
+                self_pos,
+                restrict,
+            )
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"[!!] {model_key} failed: {e}")
+            failures.append(model_key)
+
+    print("\n" + "=" * 60)
+    print(f"Done. {len(models) - len(failures)}/{len(models)} succeeded.")
+    if failures:
+        print(f"Failed: {', '.join(failures)}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import math
 import os
 import random
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -15,9 +16,9 @@ from loguru import logger
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
-from llmteach.api import APIQuery
-from llmteach.executor import QueryExecutor
-from llmteach.postprocess import fix_thinking
+from .math_vs_word.llmteach.api import APIQuery
+from .math_vs_word.llmteach.executor import QueryExecutor
+from .math_vs_word.llmteach.postprocess import fix_thinking
 
 
 NUM_PLAYERS_DEFAULT = 150
@@ -670,8 +671,9 @@ def main():
 
     parser.add_argument(
         "--config_file",
-        required=True,
-        help="Path to YAML config file.",
+        default=str(Path(__file__).resolve().parent / "config_additional.yaml"),
+        help="Path to YAML config file (default: config_additional.yaml, next "
+        "to this module).",
     )
 
     parser.add_argument(

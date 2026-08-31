@@ -3,11 +3,12 @@
 Beyond the plain llm.embed() wrapper this originally was, VLLMProcessor now
 carries the pieces needed to serve models whose Hugging Face repos aren't
 directly loadable/configurable by vLLM - all validated model-by-model against
-the previous production paths in scripts/test_vllm_feasibility.py
+the previous production paths (verdicts archived in
+results/diagnostics/vllm_feasibility/summary.json)
 (results/vllm_feasibility/summary.json, 2026-08-19):
 
 - pooler_config as a PLAIN DICT (version-tolerant field mapping, see
-  make_pooler_config) so callers like run_rerankers.py's GENERIC_MODELS can
+  make_pooler_config) so callers like run_experiments.py's GENERIC_MODELS can
   express pooling overrides as JSON-able init_kwargs;
 - export_clean: a one-off HF AutoModel re-export for checkpoints vLLM's
   loader can't consume directly (bert-base-uncased's MLM checkpoint prefixes
@@ -18,7 +19,7 @@ the previous production paths in scripts/test_vllm_feasibility.py
   sentence-transformers silently truncates;
 - client-side batch_size slicing of embed calls - vLLM has no such knob
   (it schedules/micro-batches internally); the timing harness
-  (scripts/measure_query_time.py) uses this to standardize request-level
+  (scripts/run_timing.py) uses this to standardize request-level
   parallelism at 16 documents in flight across every model.
 """
 
@@ -38,11 +39,10 @@ def _get_model_name(llm) -> str | None:
 
 def artifact_cache_dir() -> Path:
     """Where one-off derived checkpoints (clean re-exports, merged LoRA
-    adapters) are cached. Deliberately NOT under results/ - that directory
-    rides the region rsync sync-back (scripts/rerankers/_common.sh) and a
-    ~16GB merged model must never be pushed over SSH on every job exit.
-    /scratch is per-node, so a first job on a fresh node pays the derivation
-    once; that's accepted."""
+    adapters) are cached. Deliberately NOT under results/ - that directory is
+    the repo's tracked evidence, and a ~16GB merged model has no business in
+    it. /scratch is per-node, so a first run on a fresh node pays the
+    derivation once; that's accepted."""
     env = os.environ.get("SABERMATH_VLLM_EXPORT_DIR")
     if env:
         return Path(env)

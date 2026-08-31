@@ -4,7 +4,7 @@ calc_sims.py's --query-shards/--query-shard splits the targets into strided
 shards (i % n == shard), each with its own
 "similarities/<method>[__<arm>]__shard<i>of<n>.json". This merges them back.
 
-Unlike scripts/merge_dedup_parts.py this is a plain dict union and nothing
+Unlike sabermath.shards.merge_dedup this is a plain dict union and nothing
 more, because the file IS the per-target record: each entry is keyed by
 target_id and holds that target's three similarities, computed independently
 of every other target. There are no corpus-level aggregates to recompute, so

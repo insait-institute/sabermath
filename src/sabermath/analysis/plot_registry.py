@@ -1,7 +1,7 @@
 """Read the math-vs-word figure's model registries without running it.
 
 The latency figure must name, mark and colour a model exactly as
-``experiments/math-vs-word/plot_hist.py`` does, or the two figures cannot be
+``src/sabermath/analysis/math_vs_word/plot_hist.py`` does, or the two figures cannot be
 read side by side. Copying the entries across would let them drift, and
 importing plot_hist.py is not an option - it is a script, not a module: at
 import time it parses argv, loads a HuggingFace dataset and reads
@@ -15,7 +15,7 @@ up here on the next run.
 import ast
 from pathlib import Path
 
-PLOT_HIST = Path(__file__).resolve().parents[2] / "experiments/math-vs-word/plot_hist.py"
+PLOT_HIST = Path(__file__).resolve().parents[2] / "src/sabermath/analysis/math_vs_word/plot_hist.py"
 
 
 def _literal_dict(name: str) -> dict:

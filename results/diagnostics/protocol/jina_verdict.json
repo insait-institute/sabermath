@@ -1,0 +1,27 @@
+{
+  "jina-embeddings-v5-text-nano": {
+    "prompts": {
+      "query": "Query: ",
+      "document": "Document: "
+    },
+    "default_prompt_name": "document",
+    "prompt_less_call_equals_default_prompt": 0.9999999999999999,
+    "vllm": "no vLLM phase for this repo"
+  },
+  "jina-embeddings-v5-text-small": {
+    "prompts": {
+      "query": "Query: ",
+      "document": "Document: "
+    },
+    "default_prompt_name": "document",
+    "prompt_less_call_equals_default_prompt": 0.9999999999999998,
+    "vllm_min_cosine_vs": {
+      "default_call": 0.9529485769590647,
+      "prompt_empty": 0.9998933517955811,
+      "prompt_name=query": 0.9541096127793133,
+      "prompt_name=document": 0.9529485769590647
+    },
+    "vllm_behaves_like": "prompt_empty",
+    "vllm_adds_its_own_prompt": false
+  }
+}

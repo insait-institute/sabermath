@@ -7,7 +7,8 @@ from statistics import mean
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from sim_helpers import get_math_words_tokens
+from .sim_helpers import get_math_words_tokens
+from . import SIMILARITIES_DIR
 
 
 def tf_idf_scores(docs: List[List]):
@@ -30,7 +31,8 @@ def tf_idf_scores(docs: List[List]):
 
 def calc_tfidf_sims(good_targets: Dataset, good_candidates: Dataset):
 
-    output_path = "similarities/tf-idf.json"
+    SIMILARITIES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SIMILARITIES_DIR / "tf-idf.json"
     similarities_dict = {}
 
     for target in tqdm.tqdm(good_targets):

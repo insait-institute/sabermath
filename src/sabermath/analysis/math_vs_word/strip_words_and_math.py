@@ -3,7 +3,7 @@ import re
 import argparse
 import yaml
 
-from embed import get_top5_candidates
+from .embed import get_top5_candidates
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_file")

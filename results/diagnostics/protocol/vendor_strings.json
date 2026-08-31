@@ -1,0 +1,93 @@
+{
+  "checked": 6,
+  "failures": [],
+  "models": {
+    "embeddinggemma-300m": {
+      "repo_prompts": {
+        "query": "task: search result | query: ",
+        "document": "title: none | text: ",
+        "BitextMining": "task: search result | query: ",
+        "Clustering": "task: clustering | query: ",
+        "Classification": "task: classification | query: ",
+        "InstructionRetrieval": "task: code retrieval | query: ",
+        "MultilabelClassification": "task: classification | query: ",
+        "PairClassification": "task: sentence similarity | query: ",
+        "Reranking": "task: search result | query: ",
+        "Retrieval": "task: search result | query: ",
+        "Retrieval-query": "task: search result | query: ",
+        "Retrieval-document": "title: none | text: ",
+        "STS": "task: sentence similarity | query: ",
+        "Summarization": "task: summarization | query: "
+      },
+      "repo_default_prompt_name": null,
+      "configured_query_prompt": "task: search result | query: ",
+      "configured_document_prompt": "title: none | text: ",
+      "mismatches": []
+    },
+    "jina-embeddings-v5-text-nano": {
+      "repo_prompts": {
+        "query": "Query: ",
+        "document": "Document: "
+      },
+      "repo_default_prompt_name": "document",
+      "configured_query_prompt": "Query: ",
+      "configured_document_prompt": "Document: ",
+      "mismatches": []
+    },
+    "jina-embeddings-v5-text-small": {
+      "repo_prompts": {
+        "query": "Query: ",
+        "document": "Document: "
+      },
+      "repo_default_prompt_name": "document",
+      "configured_query_prompt": "Query: ",
+      "configured_document_prompt": "Document: ",
+      "mismatches": []
+    },
+    "rader-14b": {
+      "eos_token": "<|im_end|>",
+      "configured_suffix": "<|im_end|>",
+      "eos_matches": true,
+      "chunking": {
+        "single-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "em: short one.<|im_end|>"
+        },
+        "multi-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "ger document. <|im_end|>"
+        }
+      }
+    },
+    "rader-3b": {
+      "eos_token": "<|im_end|>",
+      "configured_suffix": "<|im_end|>",
+      "eos_matches": true,
+      "chunking": {
+        "single-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "em: short one.<|im_end|>"
+        },
+        "multi-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "ger document. <|im_end|>"
+        }
+      }
+    },
+    "rader-7b": {
+      "eos_token": "<|im_end|>",
+      "configured_suffix": "<|im_end|>",
+      "eos_matches": true,
+      "chunking": {
+        "single-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "em: short one.<|im_end|>"
+        },
+        "multi-chunk": {
+          "suffix_survived": true,
+          "chunk_tail": "ger document. <|im_end|>"
+        }
+      }
+    }
+  }
+}

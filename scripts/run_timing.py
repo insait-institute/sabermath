@@ -8,8 +8,8 @@ previous revision's "rerankers keep their native batching" and
 superseded):
 
   1. Every model is timed on its PRODUCTION backend - the exact processor
-     construction run_rerankers.py / run_model.py uses (the reranker-pipeline
-     models are literally built through run_rerankers.py's own builder
+     construction run_experiments.py uses (the reranker-pipeline
+     models are literally built through run_experiments.py's own builder
      tables, so the two can never drift apart). Since 2026-08-20 that means
      vLLM for most neural models; see results/vllm_feasibility/summary.json
      for the per-model validation of those backends.
@@ -55,21 +55,22 @@ superseded):
          time an implementation production never runs. approach0 is the one
          GENUINE EXCEPTION: it delegates to pya0's search engine, which
          exposes no per-doc scoring hook to slice - it runs unmodified.
-       - CPU thread cap: scripts/timing/run_timing.slurm exports
-         OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS=16 for EVERY timing job, so no
-         method (BLAS-backed classical scoring included) uses more than 16
-         parallel CPU lanes - the CPU-side counterpart of the 16-doc GPU
-         batch budget, applied uniformly.
+       - CPU thread cap: this script sets OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS
+         to 16 before importing numpy, so no method (BLAS-backed classical
+         scoring included) uses more than 16 parallel CPU lanes - the CPU-side
+         counterpart of the 16-doc GPU batch budget, applied uniformly.
+         SABERMATH_TIMING_THREADS overrides it, at the cost of comparability
+         with the published numbers.
 
   3. Embedding models (bi-encoder, open or closed/API) have their
      amortization effect removed: every one of the N_QUERIES sampled queries
      is scored from a cold cache (check_cache=False/update_cache=False) - no
      candidate document embedding is reused across queries.
 
-  4. Everything runs on a single H200 GPU node (see
-     scripts/timing/run_timing.slurm) - including the classical/closed-API
-     models, which don't need the GPU themselves, for node/environment
-     consistency.
+  4. Everything was measured on a single H200 GPU node - including the
+     classical/closed-API models, which don't need the GPU themselves, for
+     node/environment consistency. A number measured on different hardware is
+     internally consistent but not comparable to the published table.
 
   5. Model loading is excluded from the timed region. Only the time from
      "start scoring this query's candidates" to "have the final sorted
@@ -81,9 +82,9 @@ Task is fixed to statement-full (query="statement" version, i.e. the bare
 ...") - the paper's main setting, matching the nDCG results.
 
 Usage:
-    python scripts/measure_query_time.py --model rank1-32b
-    python scripts/measure_query_time.py --model bm25 --n-queries 30
-    python scripts/measure_query_time.py --model gemini-embedding-2
+    python scripts/run_timing.py --model rank1-32b
+    python scripts/run_timing.py --model bm25 --n-queries 30
+    python scripts/run_timing.py --model gemini-embedding-2
 """
 
 import argparse
@@ -97,10 +98,24 @@ import time
 import warnings
 from pathlib import Path
 
+# THREAD CAP - must be set before numpy/torch, which read these once at import
+# and cache the pool size. Every published timing number was measured with 16
+# CPU lanes (the CPU-side counterpart of the 16-document GPU batch budget), so
+# a run on a machine with more cores would not be comparable. This used to be
+# exported by the job launcher; it lives here now so the condition holds however
+# the endpoint is invoked. Override with SABERMATH_TIMING_THREADS.
+TIMING_THREADS = os.environ.get("SABERMATH_TIMING_THREADS", "16")
+for _var in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_var, TIMING_THREADS)
+
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from sabermath.benchmark import transform
 from sabermath.data import load_data
@@ -118,13 +133,11 @@ from sabermath.processors import (
     VLLMProcessor,
 )
 
-# The reranker-pipeline models are built through run_rerankers.py's OWN
-# production builder tables (single source of truth - point 1 of the
-# methodology): rank1-*, diver-grouprank-32b, qwen3-reranker-*,
-# rader-reranker-7b, reasonir-8b, rader-3b/7b/14b via CUSTOM_MODEL_BUILDERS,
-# and qwen3-embedding-8b, reason-embed-qwen3-8b, diver-retriever-4b/0.6b via
-# GENERIC_MODELS.
-from run_rerankers import (  # noqa: E402
+# The reranker-pipeline models are built through the registry's OWN production
+# builder tables (single source of truth - point 1 of the methodology), so a
+# timing number can never be measured on a backend the benchmark does not
+# actually use.
+from sabermath.registry import (  # noqa: E402
     CUSTOM_MODEL_BUILDERS as PRODUCTION_CUSTOM_BUILDERS,
     GENERIC_MODELS as PRODUCTION_GENERIC_MODELS,
 )
@@ -239,7 +252,7 @@ class OpenRouterEmbeddingProcessor(EmbeddingProcessor):
 
 
 def _production_custom(key: str):
-    """The exact processor run_rerankers.py builds in production (tp=1)."""
+    """The exact processor run_experiments.py builds in production (tp=1)."""
     return lambda: PRODUCTION_CUSTOM_BUILDERS[key](1)
 
 
@@ -254,14 +267,15 @@ def _production_generic(key: str):
 
 
 def _vllm(repo: str, **init_kwargs):
-    """models.txt-style plain vLLM embedding load (run_model.py
-    --driver vllm)."""
+    """Plain vLLM embedding load, matching how the registry's generic
+    vLLM-backed entries are built."""
     return lambda: VLLMProcessor.from_huggingface(repo, **init_kwargs)
 
 
 def _jina_nano_st():
     """The one remaining SentenceTransformers model (EuroBERT backbone,
-    vLLM-infeasible) - exact production kwargs from scripts/models.txt,
+    vLLM-infeasible) - exact production kwargs from the registry's
+    jina-embeddings-v5-text-nano entry,
     including default_task=retrieval (current jina remote code refuses to
     encode without a task at all)."""
     return STProcessor.from_huggingface(
@@ -272,8 +286,9 @@ def _jina_nano_st():
     )
 
 
-# Pooler/init recipes for the models.txt "--driver vllm" lines - keep in sync
-# with scripts/models.txt (validated in scripts/test_vllm_feasibility.py).
+# Pooler/init recipes for the registry's generic vLLM-backed models - keep in
+# sync with src/sabermath/registry.py, so a latency number is always measured
+# on the backend the benchmark actually scores with.
 _CHUNK512_POOLER = {"pooling_type": "MEAN", "normalize": False}
 
 RERANKER_BUILDERS = {
@@ -343,7 +358,7 @@ RERANKER_BUILDERS = {
         "ljw13/retro-star-qwen3-32b-0928",
         tensor_parallel_size=1,
         rewrite_log_path=(
-            "results/rerankers/.rewrites/reason-rewriter-reason-embed-8b.json"
+            "results/evaluation/.rewrites/reason-rewriter-reason-embed-8b.json"
         ),
         gpu_memory_utilization=0.55,
         rewriter_gpu_memory_utilization=0.30,
@@ -363,7 +378,7 @@ EMBEDDING_BUILDERS = {
     "reason-embed-llama-3.1-8b": _production_generic("reason-embed-llama-3.1-8b"),
     # COMPOSED REWRITE SYSTEMS (rewriter generates, then the rewrite is
     # embedded). Added 2026-08-29. inf-x-retriever already had a
-    # MODEL_ENV_YML entry in run_timing.slurm but no builder here, so it had
+    # environment mapping in the old launcher but no builder here, so it had
     # never actually been timeable - these three close that.
     #
     # The embedding category's _NO_CACHE is load-bearing, not incidental:
@@ -389,14 +404,14 @@ EMBEDDING_BUILDERS = {
     "rader-14b": _production_custom("rader-14b"),
     # SentenceTransformers-backed in production ON PURPOSE (bidirectional
     # remote-code attention, no validated vLLM path yet - see
-    # _build_inf_retriever_processor in run_rerankers.py). The "embedding"
+    # _build_inf_retriever_processor in run_experiments.py). The "embedding"
     # category's batch_size=16 default applies cleanly: STProcessor.encode
     # forwards it to sentence-transformers' own batching. NOTE bf16-style
     # first-query kernel-compile inflation doesn't apply (fp16), but ST-path
     # first-query CUDA warmup still does - read medians, not just means.
     "inf-retriever-v1-pro": _production_custom("inf-retriever-v1-pro"),
     "qwen3-embedding-8b": _production_generic("qwen3-embedding-8b"),
-    # models.txt "--driver vllm" table models (plain loads).
+    # Registry table models on plain vLLM loads.
     "qwen3-embedding-4b": _vllm("Qwen/Qwen3-Embedding-4B"),
     "qwen3-embedding-0.6b": _vllm("Qwen/Qwen3-Embedding-0.6B"),
     "harrier-oss-v1-270m": _vllm("microsoft/harrier-oss-v1-270m"),
@@ -409,7 +424,7 @@ EMBEDDING_BUILDERS = {
     "jina-embeddings-v5-text-small": _vllm("jinaai/jina-embeddings-v5-text-small"),
     "octen-embedding-4b": _vllm("Octen/Octen-Embedding-4B"),
     "octen-embedding-8b": _vllm("Octen/Octen-Embedding-8B"),
-    # models.txt chunked trio - pooler + 512 context, chunk kwargs come via
+    # The chunked trio - pooler + 512 context, chunk kwargs come via
     # MODEL_SCORES_KWARGS below.
     "roberta-base": _vllm(
         "FacebookAI/roberta-base",
@@ -428,7 +443,7 @@ EMBEDDING_BUILDERS = {
         max_model_len=512,
     ),
     # The one ST holdout (EuroBERT backbone - vLLM-infeasible, see
-    # scripts/models.txt).
+    # src/sabermath/registry.py).
     "jina-embeddings-v5-text-nano": _jina_nano_st,
 }
 
@@ -605,65 +620,17 @@ def _load_query_sample(save_to: str) -> dict:
     return json.loads(path.read_text())
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--generate-sample",
-        action="store_true",
-        help="Sample the shared N_QUERIES query indices once and write "
-        "them to <save-to>/query_sample.json, then exit - no --model "
-        "needed. Run this exactly once before submitting any per-model "
-        "timing jobs; every one of them reads this same file so every "
-        "model is timed on the identical set of queries.",
-    )
-    parser.add_argument("--model", choices=sorted(ALL_BUILDERS))
-    parser.add_argument(
-        "--n-queries",
-        type=int,
-        default=N_QUERIES,
-        help=f"Only used with --generate-sample (default: {N_QUERIES}, "
-        "itself a placeholder - see N_QUERIES at the top of this file).",
-    )
-    parser.add_argument("--seed", type=int, default=SEED, help="Only used with --generate-sample.")
-    parser.add_argument("--save-to", type=str, default="results/timing")
-    args = parser.parse_args()
+def time_one_model(model_key: str, args, queries, documents, sample, query_idxs) -> None:
+    """Time one model on the shared query sample and write its result file."""
+    builder, category = ALL_BUILDERS[model_key]
 
-    if args.generate_sample:
-        generate_query_sample(args.n_queries, args.seed, args.save_to)
-        return
-
-    if not args.model:
-        raise SystemExit("--model is required unless --generate-sample is passed")
-
-    if args.n_queries != N_QUERIES or args.seed != SEED:
-        print(
-            f"[!!] --n-queries/--seed are ignored for a --model run (got "
-            f"n_queries={args.n_queries}, seed={args.seed}) - every model "
-            f"reads the shared query_sample.json instead. Re-run "
-            f"--generate-sample first if you actually want different "
-            f"values, then re-run every --model job so they all still "
-            f"agree on the same sample."
-        )
-
-    builder, category = ALL_BUILDERS[args.model]
-
-    print("[~] Loading dataset...")
-    queries, documents = load_data()
-
-    sample = _load_query_sample(args.save_to)
-    query_idxs = sample["query_idxs"]
-    print(
-        f"[~] Loaded {len(query_idxs)} shared query indices from "
-        f"query_sample.json (seed={sample['seed']})"
-    )
-
-    print(f"[~] Building processor for {args.model} ({category})...")
+    print(f"[~] Building processor for {model_key} ({category})...")
     processor = builder()
 
-    scores_kwargs = _get_scores_kwargs(category, args.model)
+    scores_kwargs = _get_scores_kwargs(category, model_key)
     print(f"[~] get_scores kwargs for this run: {scores_kwargs}")
-    if args.model in _BUILDER_BATCHING_NOTE:
-        print(f"[~] builder-level batching: {_BUILDER_BATCHING_NOTE[args.model]}")
+    if model_key in _BUILDER_BATCHING_NOTE:
+        print(f"[~] builder-level batching: {_BUILDER_BATCHING_NOTE[model_key]}")
 
     per_query_seconds = []
     measured_idxs = []
@@ -700,7 +667,7 @@ def main() -> None:
 
     arr = np.asarray(per_query_seconds, dtype=float)
     result = {
-        "model": args.model,
+        "model": model_key,
         "category": category,
         "backend": getattr(processor, "processor", None),
         "task": f"{TASK_QUERY_VERSION}-{TASK_DOC_VERSION}",
@@ -710,7 +677,7 @@ def main() -> None:
         "query_idxs": measured_idxs,
         "standardized_batch_size": BATCH_SIZE,
         "scores_kwargs": scores_kwargs,
-        "builder_batching": _BUILDER_BATCHING_NOTE.get(args.model),
+        "builder_batching": _BUILDER_BATCHING_NOTE.get(model_key),
         "per_query_seconds": per_query_seconds,
         "mean_seconds": float(arr.mean()) if len(arr) else None,
         "median_seconds": float(np.median(arr)) if len(arr) else None,
@@ -719,7 +686,7 @@ def main() -> None:
 
     save_dir = Path(args.save_to)
     save_dir.mkdir(parents=True, exist_ok=True)
-    out_path = save_dir / f"{args.model}.json"
+    out_path = save_dir / f"{model_key}.json"
     out_path.write_text(json.dumps(result, indent=2))
     print(f"\n[+] Wrote {out_path}")
     if result["mean_seconds"] is not None:
@@ -730,6 +697,91 @@ def main() -> None:
         )
     else:
         print("[!!] No queries were successfully measured.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--generate-sample",
+        action="store_true",
+        help="Sample the shared N_QUERIES query indices once and write "
+        "them to <save-to>/query_sample.json, then exit - no --models "
+        "needed. Run this exactly once before submitting any per-model "
+        "timing jobs; every one of them reads this same file so every "
+        "model is timed on the identical set of queries.",
+    )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        metavar="KEY",
+        default=None,
+        help="Models to time (default: all of them). Each is timed on its "
+        "PRODUCTION backend, on the same shared query sample.",
+    )
+    parser.add_argument(
+        "--n-queries",
+        type=int,
+        default=N_QUERIES,
+        help=f"Only used with --generate-sample (default: {N_QUERIES}, "
+        "itself a placeholder - see N_QUERIES at the top of this file).",
+    )
+    parser.add_argument("--seed", type=int, default=SEED, help="Only used with --generate-sample.")
+    parser.add_argument("--save-to", type=str, default="results/timing")
+    args = parser.parse_args()
+
+    if args.generate_sample:
+        generate_query_sample(args.n_queries, args.seed, args.save_to)
+        return
+
+    if args.n_queries != N_QUERIES or args.seed != SEED:
+        print(
+            f"[!!] --n-queries/--seed are ignored for a timing run (got "
+            f"n_queries={args.n_queries}, seed={args.seed}) - every model "
+            f"reads the shared query_sample.json instead. Re-run "
+            f"--generate-sample first if you actually want different "
+            f"values, then re-run every timing job so they all still "
+            f"agree on the same sample."
+        )
+
+    print("[~] Loading dataset...")
+    queries, documents = load_data()
+
+    # Every model reads the SAME query_sample.json, so a latency table is
+    # never a comparison across different query sets.
+    sample = _load_query_sample(args.save_to)
+    query_idxs = sample["query_idxs"]
+    print(
+        f"[~] Loaded {len(query_idxs)} shared query indices from "
+        f"query_sample.json (seed={sample['seed']})"
+    )
+
+    models = args.models or sorted(ALL_BUILDERS)
+    unknown = [m for m in models if m not in ALL_BUILDERS]
+    if unknown:
+        raise SystemExit(
+            f"No timing builder for: {', '.join(unknown)}. "
+            f"Available: {', '.join(sorted(ALL_BUILDERS))}"
+        )
+
+    failures = []
+    for i, model_key in enumerate(models, start=1):
+        print("\n" + "#" * 60)
+        print(f"# timing: {model_key} ({i}/{len(models)})")
+        print("#" * 60)
+        try:
+            time_one_model(model_key, args, queries, documents, sample, query_idxs)
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"[!!] {model_key} failed: {e}")
+            failures.append(model_key)
+
+    print("\n" + "=" * 60)
+    print(f"Done. {len(models) - len(failures)}/{len(models)} succeeded.")
+    if failures:
+        print(f"Failed: {', '.join(failures)}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

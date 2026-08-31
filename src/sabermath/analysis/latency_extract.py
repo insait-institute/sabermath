@@ -29,12 +29,14 @@ import json
 import re
 from pathlib import Path
 
-import plot_hist_registry
+from . import plot_registry as plot_hist_registry
 
-REPO = Path(__file__).resolve().parents[2]
+# parents: [0] analysis, [1] sabermath, [2] src, [3] the repo root.
+REPO = Path(__file__).resolve().parents[3]
 SVG = REPO / "figure2-latency-mini.svg"
-RESCALING = REPO / "experiments/rescaling_robustness/results.json"
-OUT = Path(__file__).resolve().parent / "data.csv"
+RESCALING = REPO / "results/rescaling/results.json"
+# Output goes under results/, never next to the source.
+OUT = REPO / "results/latency/data.csv"
 
 # --- Axis calibration, read off the SVG's own gridlines ---------------
 # x: log10 latency in seconds. The "0.01 s" .. "100 s" gridlines sit at
@@ -53,7 +55,7 @@ def to_ndcg(y_px: float) -> float:
 
 
 # --- The 15 legend entries, keyed by the marker's (fill, shape) -------
-# Values are ids from experiments/math-vs-word/plot_hist.py, which owns the
+# Values are ids from src/sabermath/analysis/math_vs_word/plot_hist.py, which owns the
 # display name, marker and colour each of these is drawn with. The SVG's own
 # fills and shapes are NOT reused - only its geometry is.
 LEGEND = {

@@ -1,0 +1,40 @@
+# For: inf-retriever-v1-pro and inf-x-retriever ONLY. Split off the shared ST
+# bi-encoder environment on 2026-08-21 after a smoke run failed at model load;
+# that environment's "transformers>=4.51.0" FLOOR installs transformers 5.x
+# (5.15.1 on the failing machine), whose Qwen2Config no longer exposes a flat
+# rope_theta - but this model's remote modeling_qwen.py (the gte-Qwen2
+# bidirectional-attention code that makes the model what it is) reads
+# config.rope_theta directly, so the load crashes with
+# "'Qwen2Config' object has no attribute 'rope_theta'".
+#
+# transformers is EXACT-pinned to 4.51.3: the LAST PATCH of the minor the
+# repo's own config.json is stamped with (transformers_version: 4.51.0,
+# i.e. what the authors themselves ran), and inside
+# sentence-transformers==5.7.0's declared range (>=4.41,<6 - verified
+# against its PyPI metadata). Not 4.51.0 exactly: smoke job 731988 hit
+# 4.51.0's own from_pretrained loader bug - get_init_context references
+# accelerate's init_empty_weights without accelerate installed
+# ("NameError: name 'init_empty_weights' is not defined") - which the
+# 4.51.x patch releases fixed; accelerate is ALSO installed belt-and-braces
+# so the accelerate-only loader path is available either way. The ST==5.7.0
+# pin carries over from that shared environment and is just as load-bearing
+# here: this tokenizer ships a chat template, the exact ST>=5.7
+# "message"-modality corruption vector studied for RaDeR (see that env's
+# header for the history).
+#
+# NOTE mkenv reuses an existing env NAME without re-checking the yml
+# content (verified in /usr/bin/mkenv: named-env hit returns before any
+# config comparison), so the launcher's env name gets bumped whenever this
+# file's pins change. Stale names safe to delete wherever they exist:
+# "reranker-st-inf-retriever-v1-pro" (transformers 5.15.1, job 731976) and
+# "reranker-inf-retriever-v1-pro-tf451" (transformers 4.51.0, job 731988).
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install "transformers==4.51.3" "sentence-transformers==5.7.0" accelerate torch datasets numpy
+  pip install -e "$SABERMATH_REPO"

@@ -14,7 +14,8 @@ import tqdm
 
 import pya0
 
-from embed import get_top5_candidates
+from .embed import get_top5_candidates
+from . import SIMILARITIES_DIR
 
 _BROKEN_QUERIES = [
     # MD5 hashes of queries that cause Approach0's
@@ -324,7 +325,8 @@ def search_pya0_index(
 
 def calc_approach0_sims(good_targets: Dataset, good_candidates: Dataset):
 
-    output_path = "similarities/approach0.json"
+    SIMILARITIES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SIMILARITIES_DIR / "approach0.json"
 
     similarities_dict = {}
 

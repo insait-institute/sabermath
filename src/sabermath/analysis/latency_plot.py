@@ -14,7 +14,7 @@ the math-vs-word figure so the two can be read as one pair:
     copied, so the two figures cannot drift apart;
   * the other 27 models stay anonymous grey circles, exactly as in the mini.
 
-    python experiments/latency/plot_latency.py
+    python -m sabermath.analysis.latency_plot
 
 Data comes from ``data.csv``; see ``extract_from_svg.py`` for where each of
 its two columns is sourced.
@@ -28,11 +28,12 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator, FuncFormatter
 
-import plot_hist_registry
+from . import plot_registry as plot_hist_registry
 
-HERE = Path(__file__).resolve().parent
-DATA = HERE / "data.csv"
-OUT_DIR = HERE / "plots"
+# parents: [0] analysis, [1] sabermath, [2] src, [3] the repo root.
+REPO = Path(__file__).resolve().parents[3]
+DATA = REPO / "results/latency/data.csv"
+OUT_DIR = REPO / "results/latency/plots"
 OUT_STEM = "figure2_latency"
 
 # Colour of the 27 models with no legend entry.

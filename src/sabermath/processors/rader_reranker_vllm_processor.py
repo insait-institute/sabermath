@@ -1,5 +1,5 @@
 """RaDeR's pointwise cross-encoder reranker served through vLLM - the
-PRODUCTION default since 2026-08-20 (the HF+peft RaDeRRerankerProcessor stays
+PRODUCTION default since 2026-08-20 (the HF+peft implementation it replaced
 as the legacy reference path).
 
 The HF repo ships only a LoRA SEQ_CLS adapter on Qwen/Qwen2.5-7B-Instruct
@@ -11,7 +11,7 @@ checkpoint as a plain Qwen2ForSequenceClassification.
 
 Scoring inputs are the exact "query: Query: {q} document:  {d} <eos>" token
 ids the HF path builds - the T10 template, NOT rerank.py's; see
-RaDeRRerankerProcessor's module docstring for the measurements behind it
+results/diagnostics/vllm_feasibility/summary.json for the measurements behind it
 (doc-side truncation so prefix+doc+tail+eos fits max_length, the trailing
 space and eos appended AFTER truncating so the scoring position is always
 the eos and the space is never what gets trimmed), passed
@@ -19,7 +19,8 @@ as TokensPrompt to llm.classify() with the classifier activation disabled -
 softmax over a single label would be a constant 1.0, and the raw logit keeps
 scores directly comparable to the HF path.
 
-Validated against the HF path in scripts/test_vllm_feasibility.py
+Validated against a raw-HF reference (verdicts archived in
+results/diagnostics/vllm_feasibility/summary.json)
 (FEASIBLE: Spearman 0.9968, mean |dNDCG@10| 0.0082 on the frozen sample).
 """
 
@@ -27,10 +28,10 @@ from pathlib import Path
 from typing import ClassVar
 
 from .base import ModelProcessor
-from .rader_reranker_processor import DEFAULT_LORA_MODEL
 from .vllm_processor import artifact_cache_dir, make_pooler_config
 
-DEFAULT_MAX_LENGTH = 8192  # matches RaDeRRerankerProcessor's default
+DEFAULT_LORA_MODEL = "Raderspace/reranker_Qwen25_7B_NuminaMath_MATH_allquerytypes"
+DEFAULT_MAX_LENGTH = 8192  # the HF reference implementation's default
 
 
 class RaDeRRerankerVLLMProcessor(ModelProcessor):
@@ -81,7 +82,7 @@ class RaDeRRerankerVLLMProcessor(ModelProcessor):
         except ImportError as e:
             raise ImportError(
                 "Please install peft to use RaDeRRerankerVLLMProcessor (the "
-                "one-off LoRA merge needs it - see env_vllm_feas.yml)"
+                "one-off LoRA merge needs it - see scripts/envs/env_vllm.yml)"
             ) from e
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -141,7 +142,7 @@ class RaDeRRerankerVLLMProcessor(ModelProcessor):
         self._tokenizer = AutoTokenizer.from_pretrained(merged)
 
     def _build_input_ids(self, query: str, document: str) -> list[int]:
-        """Keep in sync with RaDeRRerankerProcessor._build_input_ids."""
+        """RaDeR's trained pair format: see docs/backend-provenance.md."""
         prefix_ids = self._tokenizer(
             f"query: Query: {query} document: ", add_special_tokens=False
         ).input_ids

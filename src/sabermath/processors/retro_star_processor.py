@@ -36,7 +36,7 @@ vendor configuration.
 
 DEVIATIONS, both deliberate:
   - BACKEND: vLLM, not SGLang (this repo has one serving stack, pinned in
-    scripts/rerankers/envs/env_vllm.yml). The generation contract is
+    scripts/envs/env_vllm.yml). The generation contract is
     reproduced knob for knob: n/temperature/top_k/repetition_penalty/
     max_new_tokens/skip_special_tokens/spaces_between_special_tokens, the
     same chat template with enable_thinking=False, and the same
@@ -362,7 +362,7 @@ class RetroStarRewrittenProcessor(ModelProcessor):
         return f"{self._rewriter._rewriter_name} + {self._retro.model}"
 
     def prefetch_rewrites(self, queries: list[str]) -> None:
-        """Harness hook (see run_rerankers._prefetch_if_supported). With the
+        """Harness hook (see sabermath.runner's prefetch step). With the
         rewriter row's log in place this reports everything cached and
         generates nothing.
 

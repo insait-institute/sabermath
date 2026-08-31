@@ -8,8 +8,8 @@ from .google_processor import GoogleProcessor
 from .openai_processor import OpenAIProcessor
 from .openrouter_processor import OpenRouterEmbeddingProcessor
 
-# The legacy/lexical baselines (BM25, TF-IDF, Jaccard) depend on the
-# optional "legacy" extra (rank_bm25, scikit-learn, pya0 - see
+# The lexical baselines (BM25, TF-IDF, Jaccard) depend on the
+# optional "lexical" extra (rank_bm25, scikit-learn, pya0 - see
 # pyproject.toml's [project.optional-dependencies]). TfidfProcessor imports
 # sklearn directly, and all three also import pya0 transitively via
 # tokenization_helper. Import them defensively so a plain `pip install -e .`
@@ -18,7 +18,7 @@ from .openrouter_processor import OpenRouterEmbeddingProcessor
 # three without the extra installed raises (via TypeError on `None(...)`,
 # since that's a clearer failure point than an import-time crash for
 # everyone else). Confirmed the hard way: this used to break importing
-# `sabermath` at all for every reranker model, not just the legacy ones.
+# `sabermath` at all for every reranker model, not just the lexical ones.
 try:
     from .tf_idf_processor import TfidfProcessor
 except ImportError:
@@ -35,19 +35,16 @@ except ImportError:
 from .approach0_processor import Approach0Processor
 
 from .rank1_processor import Rank1Processor
-from .rank1_hf_processor import Rank1HFProcessor
-from .qwen3_reranker_processor import Qwen3RerankerProcessor
 from .colbert_processor import ColBERTProcessor
 from .reasonir_processor import ReasonIRProcessor
 from .splade_processor import SpladeProcessor
 from .grouprank_processor import GroupRankProcessor
-from .rader_reranker_processor import RaDeRRerankerProcessor
 
-# vLLM-backed production defaults (since 2026-08-20) for the two cross-encoder
-# reranker families above; the HF-transformers versions stay as the legacy
-# reference paths (scripts/test_vllm_feasibility.py compares the two). Heavy
-# deps (vllm, peft) are imported lazily inside _init, so these imports are as
-# cheap as the rest.
+# The two cross-encoder reranker families, vLLM-backed since 2026-08-20. The
+# HF-transformers implementations they were validated against were removed on
+# 2026-08-31; their equivalence measurements are archived in
+# results/diagnostics/vllm_feasibility/summary.json. Heavy deps (vllm, peft)
+# are imported lazily inside _init, so these imports are as cheap as the rest.
 from .qwen3_reranker_vllm_processor import Qwen3RerankerVLLMProcessor
 from .rader_reranker_vllm_processor import RaDeRRerankerVLLMProcessor
 

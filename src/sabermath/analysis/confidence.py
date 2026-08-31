@@ -22,8 +22,8 @@ DOMAIN_SAMPLE_COUNT = 300
 X = 10000
 SEED = 42411
 
-CACHE_DIR = "../../.vector.cache"
-RESULT_DIR = "./confresult"
+CACHE_DIR = ".vector.cache"
+RESULT_DIR = "results/confidence"
 
 cached_models = [
     "microsoft/harrier-oss-v1-270m",

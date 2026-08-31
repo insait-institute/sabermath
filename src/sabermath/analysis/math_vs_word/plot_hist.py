@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import yaml
 
-from sim_helpers import get_math_words_tokens
+from .sim_helpers import get_math_words_tokens
+from . import PLOTS_DIR, SIMILARITIES_DIR
 
 # ---------------------------------------------------------------------
 # Default smaller list of models to include in the plot.
@@ -539,11 +540,11 @@ def model_to_color(
 
 def load_similarity_content(model_id: str) -> dict[str, dict[str, Any]]:
     model_name = model_to_file_stem(model_id)
-    baseline_path = Path("similarities") / f"{model_name}.json"
+    baseline_path = SIMILARITIES_DIR / f"{model_name}.json"
     path = baseline_path
 
     if INSTRUCTION_SUFFIX is not None:
-        instructed_path = Path("similarities") / f"{model_name}__{INSTRUCTION_SUFFIX}.json"
+        instructed_path = SIMILARITIES_DIR / f"{model_name}__{INSTRUCTION_SUFFIX}.json"
         if instructed_path.exists():
             path = instructed_path
         else:
@@ -648,7 +649,7 @@ def target_math_token_ratio(target: Mapping[str, Any]) -> float:
 # --all outright - not related to --instruction, reproduces with neither
 # flag set):
 #   - inf-x-retriever: shares inf-retriever-v1-pro's byte-identical
-#     retriever backend (see scripts/run_rerankers.py's own comment on
+#     retriever backend (see scripts/run_experiments.py's own comment on
 #     INFXRetrieverProcessor) - same fp16/anisotropy tie behavior -
 #     6/969 targets tied.
 # Any OTHER model hitting this is still treated as a real bug (raised
@@ -1027,7 +1028,7 @@ def plot_maths_greater_than_words_points(
         # confirmed on both figures.
         plt.tight_layout()
 
-    Path("plots").mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     fig.savefig(
         output_path,
@@ -1135,7 +1136,7 @@ fig, ax = plot_maths_greater_than_words_points(
     # follows automatically).
     legend_ncol=6 if args.all else 1,
     legend_outside=args.all,
-    output_path=str(Path("plots") / output_filename),
+    output_path=str(PLOTS_DIR / output_filename),
 )
 
 print("\nPercentage of targets with M>W:")

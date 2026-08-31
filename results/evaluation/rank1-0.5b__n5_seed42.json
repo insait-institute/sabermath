@@ -1,0 +1,130 @@
+{
+  "domains": [
+    [
+      "Algebra"
+    ],
+    [
+      "Algebra"
+    ],
+    [
+      "Geometry"
+    ],
+    [
+      "Calculus and Analysis"
+    ],
+    [
+      "Combinatorics"
+    ]
+  ],
+  "reports": {
+    "rank1-0.5b": {
+      "model": "jhu-clsp/rank1-0.5b",
+      "processor": "rank1",
+      "dcg_variant": "exponent",
+      "k": 10,
+      "tasks": [
+        {
+          "task": "statement-statement",
+          "ndcg_at_k": 0.36909422670924064,
+          "branches": [
+            {
+              "branch": "Algebra",
+              "ndcg_at_k": 0.5491392081856443
+            },
+            {
+              "branch": "Geometry",
+              "ndcg_at_k": 0.34963396839129046
+            },
+            {
+              "branch": "Number Theory",
+              "ndcg_at_k": 0.0
+            },
+            {
+              "branch": "Combinatorics",
+              "ndcg_at_k": 0.2321024616826917
+            },
+            {
+              "branch": "Calculus and Analysis",
+              "ndcg_at_k": 0.16545628710093235
+            }
+          ]
+        },
+        {
+          "task": "statement-full",
+          "ndcg_at_k": 0.41496836172541185,
+          "branches": [
+            {
+              "branch": "Algebra",
+              "ndcg_at_k": 0.47423724741704537
+            },
+            {
+              "branch": "Geometry",
+              "ndcg_at_k": 0.5459098440866927
+            },
+            {
+              "branch": "Number Theory",
+              "ndcg_at_k": 0.0
+            },
+            {
+              "branch": "Combinatorics",
+              "ndcg_at_k": 0.3299374391123487
+            },
+            {
+              "branch": "Calculus and Analysis",
+              "ndcg_at_k": 0.25052003059392675
+            }
+          ]
+        },
+        {
+          "task": "full-full",
+          "ndcg_at_k": 0.36288316124240083,
+          "branches": [
+            {
+              "branch": "Algebra",
+              "ndcg_at_k": 0.4754207381046237
+            },
+            {
+              "branch": "Geometry",
+              "ndcg_at_k": 0.2602118019999929
+            },
+            {
+              "branch": "Number Theory",
+              "ndcg_at_k": 0.0
+            },
+            {
+              "branch": "Combinatorics",
+              "ndcg_at_k": 0.3363523051062993
+            },
+            {
+              "branch": "Calculus and Analysis",
+              "ndcg_at_k": 0.26701022289646453
+            }
+          ]
+        }
+      ],
+      "ndcgs_by_task": {
+        "statement-statement": [
+          0.5017367666406645,
+          0.5965416497306243,
+          0.34963396839129046,
+          0.16545628710093235,
+          0.2321024616826917
+        ],
+        "statement-full": [
+          0.2879662737015123,
+          0.6605082211325785,
+          0.5459098440866927,
+          0.25052003059392675,
+          0.3299374391123487
+        ],
+        "full-full": [
+          0.4777798539751853,
+          0.4730616222340621,
+          0.2602118019999929,
+          0.26701022289646453,
+          0.3363523051062993
+        ]
+      }
+    }
+  }
+}

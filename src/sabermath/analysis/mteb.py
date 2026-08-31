@@ -9,6 +9,9 @@ from typing import Final
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 
+from ..reporting.main_tables import MODEL_INFO, build_rows, collect
+from ..results import DEFAULT_RESULTS_DIR
+
 
 MODEL_COL: Final[str] = "Model"
 RETRIEVAL_SCORE_COL: Final[str] = "Retrieval"
@@ -23,118 +26,75 @@ MTEB_RETRIEVAL_RANK_MATCHED_COL: Final[str] = "mteb_retrieval_rank_among_matched
 LINK_RE = re.compile(r"^\[([^\]]+)\]\((.*)\)$")
 
 
-# Overall column from your LaTeX table.
+# Which MTEB leaderboard model each SABER-Math model corresponds to.
 #
-# For rows where `mteb_model_name` is None, the row is not used in the
-# MTEB correlation because there is no obvious matching MTEB leaderboard model.
-# If you know the exact MTEB model name for a baseline, fill it in.
-OUR_BENCHMARK_OVERALL_SCORES: Final[list[dict[str, object]]] = [
-    {
-        "paper_model_name": "Octen-Embedding-8B",
-        "mteb_model_name": "Octen-Embedding-8B",
-        "benchmark_overall": 0.636,
-    },
-    {
-        "paper_model_name": "Octen-Embedding-4B",
-        "mteb_model_name": "Octen-Embedding-4B",
-        "benchmark_overall": 0.632,
-    },
-    {
-        "paper_model_name": "Gemini-Embedding-2",
-        "mteb_model_name": "gemini-embedding-2-preview",
-        "benchmark_overall": 0.628,
-    },
-    {
-        "paper_model_name": "Qwen3-Embedding-4B",
-        "mteb_model_name": "Qwen3-Embedding-4B",
-        "benchmark_overall": 0.615,
-    },
-    {
-        "paper_model_name": "Qwen3-Embedding-8B",
-        "mteb_model_name": "Qwen3-Embedding-8B",
-        "benchmark_overall": 0.611,
-    },
-    {
-        "paper_model_name": "Harrier-OSS-v1-27b",
-        "mteb_model_name": "harrier-oss-v1-27b",
-        "benchmark_overall": 0.608,
-    },
-    {
-        "paper_model_name": "Gemini-Embedding-001",
-        "mteb_model_name": "gemini-embedding-001",
-        "benchmark_overall": 0.605,
-    },
-    {
-        "paper_model_name": "KaLM-Embedding-Gemma3-12B-2511",
-        "mteb_model_name": "KaLM-Embedding-Gemma3-12B-2511",
-        "benchmark_overall": 0.585,
-    },
-    {
-        "paper_model_name": "LLaMa-Embed-Nemotron-8b",
-        "mteb_model_name": "llama-embed-nemotron-8b",
-        "benchmark_overall": 0.579,
-    },
-    {
-        "paper_model_name": "Qwen3-Embedding-0.6B",
-        "mteb_model_name": "Qwen3-Embedding-0.6B",
-        "benchmark_overall": 0.575,
-    },
-    {
-        "paper_model_name": "Harrier-OSS-v1-0.6b",
-        "mteb_model_name": "harrier-oss-v1-0.6b",
-        "benchmark_overall": 0.572,
-    },
-    {
-        "paper_model_name": "Jina-Embeddings-v5-Text-Small",
-        "mteb_model_name": "jina-embeddings-v5-text-small",
-        "benchmark_overall": 0.570,
-    },
-    {
-        "paper_model_name": "Text-Embedding-3-Large",
-        "mteb_model_name": "text-embedding-3-large",
-        "benchmark_overall": 0.558,
-    },
-    {
-        "paper_model_name": "Jina-Embeddings-v5-Text-Nano",
-        "mteb_model_name": "jina-embeddings-v5-text-nano",
-        "benchmark_overall": 0.532,
-    },
-    {
-        "paper_model_name": "EmbeddingGemma-300m",
-        "mteb_model_name": "embeddinggemma-300m",
-        "benchmark_overall": 0.519,
-    },
-    {
-        "paper_model_name": "Text-Embedding-3-Small",
-        "mteb_model_name": "text-embedding-3-small",
-        "benchmark_overall": 0.512,
-    },
-    {
-        "paper_model_name": "BGE-m3",
-        "mteb_model_name": "bge-m3",
-        "benchmark_overall": 0.511,
-    },
-    {
-        "paper_model_name": "Harrier-OSS-v1-270m",
-        "mteb_model_name": "harrier-oss-v1-270m",
-        "benchmark_overall": 0.498,
-    },
-    {
-        "paper_model_name": "Multilingual-E5-Large",
-        "mteb_model_name": "multilingual-e5-large",
-        "benchmark_overall": 0.488,
-    },
-    {
-        "paper_model_name": "BERT",
-        "mteb_model_name": None,
-        "benchmark_overall": 0.357,
-    },
-    {
-        "paper_model_name": "RoBERTa",
-        "mteb_model_name": None,
-        "benchmark_overall": 0.311,
-    },
-]
+# The Overall scores themselves are NOT stored here: they are read live from
+# results/ (see load_benchmark_overall), because "MTEB does not predict
+# mathematical performance" is a headline claim and a hand-copied score list
+# goes stale silently - the correlation keeps computing, just against numbers
+# that no longer match the tables.
+#
+# A None means there is no obvious matching MTEB leaderboard model, so the
+# row is carried for context but left out of the correlation. If you know the
+# exact MTEB name for a baseline, fill it in.
+MTEB_MODEL_NAMES: Final[dict[str, str | None]] = {
+    "octen-embedding-8b": "Octen-Embedding-8B",
+    "octen-embedding-4b": "Octen-Embedding-4B",
+    "gemini-embedding-2": "gemini-embedding-2-preview",
+    "qwen3-embedding-4b": "Qwen3-Embedding-4B",
+    "qwen3-embedding-8b": "Qwen3-Embedding-8B",
+    "harrier-oss-v1-27b": "harrier-oss-v1-27b",
+    "gemini-embedding-001": "gemini-embedding-001",
+    "kalm-embedding-gemma3-12b-2511": "KaLM-Embedding-Gemma3-12B-2511",
+    "llama-embed-nemotron-8b": "llama-embed-nemotron-8b",
+    "qwen3-embedding-0.6b": "Qwen3-Embedding-0.6B",
+    "harrier-oss-v1-0.6b": "harrier-oss-v1-0.6b",
+    "jina-embeddings-v5-text-small": "jina-embeddings-v5-text-small",
+    "text-embedding-3-large": "text-embedding-3-large",
+    "jina-embeddings-v5-text-nano": "jina-embeddings-v5-text-nano",
+    "embeddinggemma-300m": "embeddinggemma-300m",
+    "text-embedding-3-small": "text-embedding-3-small",
+    "bge-m3": "bge-m3",
+    "harrier-oss-v1-270m": "harrier-oss-v1-270m",
+    "multilingual-e5-large": "multilingual-e5-large",
+    "bert-base-uncased": None,
+    "roberta-base": None,
+}
+
+
+def load_benchmark_overall(
+    results_dir: Path | str = DEFAULT_RESULTS_DIR,
+) -> list[dict[str, object]]:
+    """The rows the correlation runs over, with each Overall read from the
+    same place the paper's main table reads it.
+
+    Rows come back in MTEB_MODEL_NAMES order with the display names the tables
+    use, so a model whose number moves cannot disagree with Table 1.
+    """
+    runs, ranks = collect(Path(results_dir))
+    by_key = {row["key"]: row for row in build_rows(runs, ranks)}
+
+    rows, missing = [], []
+    for model_key, mteb_name in MTEB_MODEL_NAMES.items():
+        row = by_key.get(model_key)
+        if row is None or row.get("statement-full") is None:
+            missing.append(model_key)
+            continue
+        rows.append(
+            {
+                "paper_model_name": MODEL_INFO[model_key][0],
+                "mteb_model_name": mteb_name,
+                "benchmark_overall": round(row["statement-full"][0], 3),
+            }
+        )
+    if missing:
+        raise ValueError(
+            "No statement-full result for "
+            + ", ".join(missing)
+            + f" in {results_dir}. Run them, or drop them from "
+            "MTEB_MODEL_NAMES."
+        )
+    return rows
 
 
 def normalize_mteb_model_name(value: object) -> str:
@@ -245,8 +205,11 @@ def is_excluded_for_new_models_only(row: pd.Series) -> bool:
     return False
 
 
-def build_benchmark_scores(new_models_only: bool = False) -> pd.DataFrame:
-    benchmark = pd.DataFrame(OUR_BENCHMARK_OVERALL_SCORES)
+def build_benchmark_scores(
+    new_models_only: bool = False,
+    results_dir: Path | str = DEFAULT_RESULTS_DIR,
+) -> pd.DataFrame:
+    benchmark = pd.DataFrame(load_benchmark_overall(results_dir))
 
     required_cols = {"paper_model_name", "mteb_model_name", "benchmark_overall"}
     missing = required_cols - set(benchmark.columns)
@@ -347,8 +310,11 @@ def load_mteb_csv(path: str | Path) -> pd.DataFrame:
 def compute_correlations(
     mteb_csv_path: str | Path,
     new_models_only: bool = False,
+    results_dir: Path | str = DEFAULT_RESULTS_DIR,
 ) -> tuple[float, float, float, float, pd.DataFrame]:
-    benchmark_all = build_benchmark_scores(new_models_only=new_models_only)
+    benchmark_all = build_benchmark_scores(
+        new_models_only=new_models_only, results_dir=results_dir
+    )
     mteb = load_mteb_csv(mteb_csv_path)
 
     unmapped_benchmark_rows = benchmark_all[benchmark_all["model_key"] == ""]
@@ -465,6 +431,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mteb_file", required=True, type=Path)
     parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=DEFAULT_RESULTS_DIR,
+        help="Where the nDCG runs live; the Overall column is read from here "
+        f"(default: {DEFAULT_RESULTS_DIR}).",
+    )
+    parser.add_argument(
         "--new-models-only",
         action="store_true",
         help=(
@@ -481,6 +454,7 @@ if __name__ == "__main__":
     pearson_r, pearson_p, spearman_rho, spearman_p, matched = compute_correlations(
         args.mteb_file,
         new_models_only=args.new_models_only,
+        results_dir=args.results_dir,
     )
 
     print()

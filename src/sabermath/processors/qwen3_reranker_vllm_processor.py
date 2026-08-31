@@ -1,31 +1,45 @@
-"""Qwen/Qwen3-Reranker-* served through vLLM - the PRODUCTION default since
-2026-08-20 (the HF-transformers Qwen3RerankerProcessor stays as the legacy
-reference path).
+"""Qwen/Qwen3-Reranker-* served through vLLM - the PRODUCTION path.
 
 Uses the model card's official vLLM recipe: the causal checkpoint is reused
 as a binary ("no"/"yes") sequence classifier via hf_overrides
 (Qwen3ForSequenceClassification + classifier_from_token +
 is_original_qwen3_reranker), and each (query, document) pair is scored with
-llm.score() on the exact same <Instruct>/<Query>/<Document> template the HF
-path builds - the prefix/suffix strings are imported from
-qwen3_reranker_processor so the two backends can never drift apart.
+llm.score() on the <Instruct>/<Query>/<Document> template below.
 
-Validated against the HF path in scripts/test_vllm_feasibility.py
-(FEASIBLE for all three sizes: Spearman >= 0.999, mean |dNDCG@10| <= 0.026 on
-the frozen comparison sample).
+Validated against an HF-transformers implementation of the same template on
+2026-08-20 - FEASIBLE for all three sizes (Spearman >= 0.999, mean
+|dNDCG@10| <= 0.026 on the frozen comparison sample). That reference was
+removed on 2026-08-31; the verdicts are archived in
+results/diagnostics/vllm_feasibility/summary.json, and the template strings
+it shared now live here, which is the only remaining copy.
 """
 
 from typing import ClassVar
 
 from .base import ModelProcessor
-from .qwen3_reranker_processor import (
-    DEFAULT_MODEL,
-    DEFAULT_TASK_INSTRUCTION,
-    PROMPT_PREFIX,
-    PROMPT_SUFFIX,
+
+DEFAULT_MODEL = "Qwen/Qwen3-Reranker-8B"
+
+# A mathematical-relevance reranking task, so this is a task-specific
+# instruction (the model card recommends customizing `instruct` per scenario;
+# its own default is the generic web-search one, which the registry uses as
+# the p0 baseline instead - see VENDOR_QWEN3_RERANKER_INSTRUCTION).
+DEFAULT_TASK_INSTRUCTION = (
+    "Given a math problem query, retrieve documents that are mathematically "
+    "relevant to the query"
 )
 
-DEFAULT_MAX_LENGTH = 8192  # matches Qwen3RerankerProcessor's default
+# The official yes/no judging chat template, verbatim from the model card
+# (https://huggingface.co/Qwen/Qwen3-Reranker-8B).
+PROMPT_PREFIX = (
+    "<|im_start|>system\nJudge whether the Document meets the "
+    "requirements based on the Query and the Instruct provided. Note "
+    'that the answer can only be "yes" or "no".<|im_end|>\n'
+    "<|im_start|>user\n"
+)
+PROMPT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
+DEFAULT_MAX_LENGTH = 8192  # the HF reference implementation's default
 
 
 class Qwen3RerankerVLLMProcessor(ModelProcessor):

@@ -1,12 +1,19 @@
+import argparse
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from datasets import load_dataset
 import yaml
-import argparse
+from datasets import load_dataset
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_file", required=True)
+parser.add_argument(
+    "--config_file",
+    default=str(Path(__file__).resolve().parent / "config_additional.yaml"),
+    help="Path to the YAML config (default: config_additional.yaml, next to "
+    "this module).",
+)
 
 group = parser.add_mutually_exclusive_group(required=False)
 group.add_argument("--algebra", action="store_true")

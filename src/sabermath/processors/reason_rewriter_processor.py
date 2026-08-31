@@ -69,7 +69,7 @@ almost idle: MEASURED at ~0.6 min/query, i.e. ~10 hours for 1000 queries,
 against ~13 queries/min for the Retro* rerankers, which submit all ~150 of a
 query's candidates at once. prefetch_rewrites() therefore generates the
 WHOLE query set in one batched call, letting vLLM's continuous batching keep
-the GPU full; scoring then runs off the cache. scripts/run_rerankers.py
+the GPU full; scoring then runs off the cache. scripts/run_experiments.py
 calls it with the exact query set being evaluated (so --n subsets and query
 shards prefetch only what they need), and a query that somehow misses the
 cache still falls back to generating on demand, so the hook is an
@@ -155,7 +155,7 @@ REWRITER_SAMPLING = {
 # See fact (2): the released artifact ships five samples per query.
 DEFAULT_N_REWRITES = 5
 
-# The retriever's own GENERIC_MODELS configuration in scripts/run_rerankers.py -
+# The retriever's own GENERIC_MODELS configuration in scripts/run_experiments.py -
 # duplicated here rather than imported so this processor stays importable
 # from the library alone; keep the two in sync.
 RETRIEVER_POOLER_CONFIG = {"pooling_type": "LAST", "normalize": True}
@@ -173,7 +173,7 @@ class ReasonRewriterProcessor(ModelProcessor):
     # THIS FINGERPRINT IS NOT ENOUGH ON ITS OWN. Confirmed the hard way (job
     # 761576): after bumping it, the rerun reported the OLD score to the
     # digit, because evaluate()'s per-query nDCG checkpoint
-    # (results/rerankers/.checkpoints/<model>/<subset>/<task>.json) resumes
+    # (results/evaluation/.checkpoints/<model>/<subset>/<task>.json) resumes
     # BEFORE a processor is ever asked for a score, so no rewrite was
     # requested and the fingerprint was never consulted. That checkpoint is
     # keyed by (model, subset, task) only - it knows nothing about a recipe.
@@ -201,7 +201,7 @@ class ReasonRewriterProcessor(ModelProcessor):
         # Extra vLLM init kwargs for the RETRIEVER half only. The pooler is
         # not overridable here on purpose (every Reason-Embed checkpoint is
         # LAST+normalize), but max_model_len is: the llama-3.1 variant is
-        # pinned to 40960 in run_rerankers' standalone spec so the ablation's
+        # pinned to 40960 in the registry's standalone spec so the ablation's
         # effective context matches across backends, and a composed row that
         # silently took llama's 131072 default would not be comparable to it.
         retriever_init_kwargs: dict | None = None,
@@ -426,7 +426,7 @@ class ReasonRewriterProcessor(ModelProcessor):
         self, query: str, *, check_cache: bool = True, update_cache: bool = True
     ) -> list[str]:
         """The query's n rewrites, generated once and cached by raw query
-        text: one run_rerankers.py process scores the same statement queries
+        text: one run_experiments.py process scores the same statement queries
         under two tasks, and both must see the same rewrites."""
         if check_cache:
             cached = self._rewrite_cache.get(query)
@@ -445,7 +445,7 @@ class ReasonRewriterProcessor(ModelProcessor):
 
     # ------------------------------------------------- instruction plumbing
 
-    # WHICH HALF GETS THE INSTRUCTION. run_rerankers.py's --instructions path
+    # WHICH HALF GETS THE INSTRUCTION. run_experiments.py's --instructions path
     # wraps the instruction INTO the query text ("Instruct: ...\nQuery: ..."),
     # and _rewrite() is handed that wrapped text - so the REWRITER is
     # instructed for free, and its cache key differs per prompt key. The

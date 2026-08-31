@@ -32,16 +32,17 @@ only aggregates are stable.
 
 This class is vLLM-NATIVE: it was never migrated from an HF implementation,
 so unlike the RaDeR and Qwen3 rerankers it had no reference to be checked
-against. Rank1HFProcessor (rank1_hf_processor.py) is that reference, added
+against. That HF reference was removed on 2026-08-31; its verdict is archived
+in results/diagnostics/vllm_feasibility/summary.json. It was added
 for exactly that purpose. It is NOT production - see its header.
 
 Ported from rag-math-test/rank-embedding-math/running-rerankers/sabermath_rank1.py
 (verified against a completed 100-query run: Mean nDCG@10 = 0.6068). That
 standalone script's larger runs (400+ and 1000 queries) were repeatedly
-killed by SLURM wall-clock limits before finishing - the per-query cost of
+killed by wall-clock limits before finishing - the per-query cost of
 `max_thinking_tokens` x ~150 candidates is high. Tune `max_thinking_tokens`,
 `tensor_parallel_size` and/or evaluate on a query subset (see
-scripts/run_rerankers.py --n) accordingly for a full run.
+scripts/run_experiments.py --n) accordingly for a full run.
 """
 
 import math

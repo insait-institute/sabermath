@@ -5,8 +5,9 @@ import json
 from statistics import mean
 from datasets import Dataset
 
-from embed import get_top5_candidates
-from sim_helpers import get_math_words_tokens
+from .embed import get_top5_candidates
+from .sim_helpers import get_math_words_tokens
+from . import SIMILARITIES_DIR
 
 
 def jaccard_similarity(list1, list2):
@@ -24,7 +25,8 @@ def jaccard_similarity(list1, list2):
 
 def calc_jaccard_sims(good_targets: Dataset, good_candidates: Dataset):
 
-    output_path = "similarities/jaccard.json"
+    SIMILARITIES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SIMILARITIES_DIR / "jaccard.json"
     similarities_dict = {}
 
     for target in tqdm.tqdm(good_targets):

@@ -4,8 +4,9 @@ import tqdm
 from datasets import Dataset
 from statistics import mean
 
-from embed import get_top5_candidates
-from load_models import (
+from . import SIMILARITIES_DIR
+from .embed import get_top5_candidates
+from .load_models import (
     assert_envelope_supported,
     get_model,
     get_scores_kwargs,
@@ -19,22 +20,18 @@ def calc_embedding_sims(
     good_candidates: Dataset,
     force_recalc: bool = False,
     instruction_key: str | None = None,
-    legacy: bool = False,
     query_shard: int | None = None,
     query_shards: int | None = None,
 ):
 
     PATH_ID = model_id.replace("/", "_")
-    # An instructed arm writes its OWN file, and so does a legacy-protocol
-    # run - same reason run_rerankers.py tags its legacy results (see its
-    # --legacy help): the two protocols must never overwrite each other.
+    # An instructed arm writes its OWN file, so an instructed run and a
+    # prompt-free one can never overwrite each other.
     if instruction_key is not None:
         PATH_ID = f"{PATH_ID}__{instruction_key}"
-    if legacy:
-        PATH_ID = f"{PATH_ID}__legacy"
 
     # STRIDED target split (i % shards == shard), matching
-    # run_rerankers._select_shard: every shard sees a mix of domains and
+    # sabermath.runner.select_shard: every shard sees a mix of domains and
     # difficulties rather than one contiguous block, which matters here
     # because the targets dataset is domain-ordered and a contiguous block
     # would hand one shard all the geometry.
@@ -68,18 +65,18 @@ def calc_embedding_sims(
 
     print(f"============== {model_id} ==============")
 
-    # Both of these delegate to scripts/run_rerankers.py, so the model is
+    # Both of these delegate to scripts/run_experiments.py, so the model is
     # built and scored exactly as the main experiment and run_dedup.py build
     # and score it - see load_models.py's header. instruction_key is passed
     # to get_model as well as to get_scores_kwargs because for three
     # families it changes the CONSTRUCTOR, not just the scoring kwargs.
-    processor = get_model(model_id, instruction_key, legacy=legacy)
+    processor = get_model(model_id, instruction_key)
 
     # The per-model preprocessing protocol (chunk_to_context/context_length)
     # plus the vendor input envelope (query/document prompts and suffixes,
     # per-side API params). EmbeddingProcessor.get_scores applies the
     # envelope per side, before the vector cache.
-    scores_kwargs = get_scores_kwargs(model_id, instruction_key, legacy=legacy)
+    scores_kwargs = get_scores_kwargs(model_id, instruction_key)
     if scores_kwargs:
         print(f"[~] get_scores() kwargs for {model_id}: {scores_kwargs}")
     assert_envelope_supported(model_id, processor, scores_kwargs)
@@ -98,10 +95,10 @@ def calc_embedding_sims(
 
     # Some models carry the instruction through their own mechanism - the
     # qwen3-reranker <Instruct> slot, ReasonIR's masked-prefix encode kwarg -
-    # and must NOT also get the generic wrap on top. run_rerankers decides
+    # and must NOT also get the generic wrap on top. The registry decides
     # this (its own wrap_instruction flag); we no longer guess.
     wrap = instruction_text is not None and wraps_instruction(
-        model_id, instruction_key, legacy=legacy
+        model_id, instruction_key
     )
     if instruction_text is not None and not wrap:
         print(
@@ -116,10 +113,11 @@ def calc_embedding_sims(
 
     similarities_dict = {}
 
-    output_path = f"similarities/{PATH_ID}.json"
+    SIMILARITIES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SIMILARITIES_DIR / f"{PATH_ID}.json"
     # Written via a temp file + os.replace rather than open(output_path, "w"),
     # which truncates. Two reasons, both hit in practice on 2026-08-26:
-    #   * a reader (scripts/compare_recalc.py, check_coverage.py) that lands
+    #   * a reader (check_coverage.py) that lands
     #     inside the truncate/dump window sees an empty or half-written file
     #     and raises JSONDecodeError - observed against a running
     #     GTE-ModernColBERT job;
@@ -127,8 +125,8 @@ def calc_embedding_sims(
     #     one, so the resume path cannot recover it either.
     # os.replace is atomic within a filesystem. The name is dot-prefixed and
     # .tmp-suffixed so the region sync-back's --exclude="*.tmp" skips it,
-    # matching run_rerankers.py's own *.json.tmp convention.
-    tmp_path = f"similarities/.{PATH_ID}.json.tmp"
+    # matching run_experiments.py's own *.json.tmp convention.
+    tmp_path = SIMILARITIES_DIR / f".{PATH_ID}.json.tmp"
 
     if not force_recalc:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -139,7 +137,7 @@ def calc_embedding_sims(
     print(f"===========Starting from idx {len(similarities_dict)}===========")
 
     # Batch any per-query preprocessing before scoring, mirroring
-    # run_rerankers._prefetch_if_supported. Only the composed rewriter rows
+    # sabermath.runner's prefetch hook. Only the composed rewriter rows
     # implement prefetch_rewrites, and for them this is not an optimization
     # but a feasibility fix: get_scores() generates a MISSING rewrite one
     # query at a time, which leaves ~5 sequences in flight and runs ~10x

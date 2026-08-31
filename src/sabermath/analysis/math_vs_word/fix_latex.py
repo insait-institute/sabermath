@@ -62,12 +62,20 @@ Output: \boxed{{If the radius $r$ is $5$, find the area. Use $\pi$.}}
 """
 
 
+DEFAULT_CONFIG = Path(__file__).resolve().parent / "config.yaml"
+
+
 def main():
 
     print("Begin:")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", help="Path to a config file")
+    parser.add_argument(
+        "--config_file",
+        default=str(DEFAULT_CONFIG),
+        help=f"Path to a config file (default: {DEFAULT_CONFIG.name}, next to "
+        "this module).",
+    )
 
     args = parser.parse_args()
     config_path = args.config_file
