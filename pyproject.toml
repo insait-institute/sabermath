@@ -18,13 +18,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# PINNED, mirroring scripts/rerankers/envs/env_vllm.yml (see the warning
-# there): every vLLM recipe in this repo - pooler_config kwarg name, the
-# Qwen3-Reranker SeqCls conversion, the LlamaBidirectionalModel remap - was
-# validated on exactly 0.26.0, and kwarg spellings differ on other versions.
-# scripts/run_models.sh's venv installs this extra, so the models.txt
-# "--driver vllm" table runs are covered by the pin too. Bump deliberately
-# and re-verify with scripts/test_vllm_feasibility.py, never by omission.
+# PINNED, mirroring scripts/envs/env_vllm.yml (see the warning there): every
+# vLLM recipe in this repo - pooler_config kwarg name, the Qwen3-Reranker
+# SeqCls conversion, the LlamaBidirectionalModel remap - was validated on
+# exactly 0.26.0, and kwarg spellings differ on other versions. Bump
+# deliberately, and re-validate each affected model against a raw-HF reference
+# before trusting the numbers; the previous verdicts are archived in
+# results/diagnostics/vllm_feasibility/summary.json.
 vllm = [
     "vllm==0.26.0",
     "flashinfer-python==0.6.14"
@@ -35,11 +35,19 @@ apis = [
     "openai>=2.33.0"
 ]
 
-legacy = [
+# The lexical baselines: TF-IDF, BM25, Jaccard and Approach Zero.
+lexical = [
     "scikit-learn>=1.7,<1.8; python_version < '3.11'",
     "scikit-learn>=1.7; python_version >= '3.11'",
     "rank-bm25>=0.2.2",
     "pya0==0.3.7; platform_system == 'Linux'"
+]
+
+# Deprecated alias for "lexical", kept so existing install commands and
+# cluster environment files keep working. These baselines were never legacy in
+# the sense the name suggested - they are reported in the paper.
+legacy = [
+    "sabermath[lexical]"
 ]
 
 # Custom-scoring rerankers (rank1, Qwen3-Reranker, GTE/Reason-ModernColBERT,

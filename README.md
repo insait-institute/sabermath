@@ -33,11 +33,11 @@ python -m pip install -e ".[vllm]"
 # OpenAI and Gemini embedding APIs
 python -m pip install -e ".[apis]"
 
-# Classical / legacy baselines: TF-IDF, BM25, Jaccard, Approach Zero
-python -m pip install -e ".[legacy]"
+# Lexical baselines: TF-IDF, BM25, Jaccard, Approach Zero
+python -m pip install -e ".[lexical]"
 
 # Everything
-python -m pip install -e ".[vllm,apis,legacy]"
+python -m pip install -e ".[vllm,apis,lexical]"
 ```
 
 For API-based models, set the relevant API key before running evaluation:
@@ -84,33 +84,52 @@ If `tasks` is omitted, all three tasks are evaluated. The returned report contai
 
 ### Command-line runner
 
-The `scripts/run_model.py` script provides a convenient way to evaluate supported retrievers and save the results as JSON files.
+Evaluation runs through one endpoint, `scripts/run_experiments.py`. It takes
+model KEYS from the registry (`src/sabermath/registry.py`) rather than bare
+Hugging Face names, because each model carries its own processor recipe and
+vendor input protocol:
 
 ```bash
-python scripts/run_model.py BAAI/bge-m3 \
-  --driver st \
-  --save-to results \
-  --cache
+# list every available model key
+python scripts/run_experiments.py --list
+
+# every model, no instruction - reproduces the main tables
+python scripts/run_experiments.py
+
+# a subset
+python scripts/run_experiments.py --models bge-m3 qwen3-reranker-4b
+
+# one task, one model
+python scripts/run_experiments.py --models rank1-7b --task statement-full
+
+# smoke test on 20 random queries before committing to a full run
+python scripts/run_experiments.py --models rank1-32b --n 20
+
+# the instruction ablation: four prompt arms, sharing one loaded model
+python scripts/run_experiments.py --prompts p0 p1 p2 p3
 ```
 
-For vLLM-backed models, use `--driver vllm`:
+`--models` defaults to every model in the registry and `--prompts` defaults to
+`p0` ("no instruction"), so a bare invocation is the production sweep. Results
+are written to `results/evaluation/<model>__<prompt>.json`, checkpointed after
+every query, so re-running an interrupted command resumes rather than
+restarting.
 
-```bash
-python scripts/run_model.py Qwen/Qwen3-Embedding-8B \
-  --driver vllm \
-  --save-to results \
-  --cache
-```
+Most models share one environment, but four families need their own and will
+fail loudly in the wrong one — see the docstring in
+`scripts/run_experiments.py` and the environment files in `scripts/envs/`. In a
+single shared environment, run one model or one same-env family per
+invocation.
 
-The runner also supports API models and classical baselines:
+The other endpoints follow the same shape, each with `--models` defaulting to
+all:
 
-```bash
-python scripts/run_model.py google/gemini-embedding-001 --save-to results --cache
-python scripts/run_model.py openai/text-embedding-3-large --save-to results --cache
-python scripts/run_model.py bm25 --save-to results
-```
-
-Accepted model names include Hugging Face model IDs, `google/<model>`, `openai/<model>`, `bm25`, `tf-idf`, `approach0`, and `jaccard`. Note: `approach0` is only supported on Linux systems.
+| Endpoint | Experiment |
+|---|---|
+| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms |
+| `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks |
+| `scripts/run_timing.py` | Per-query latency on production backends |
+| `scripts/report_experiments.py` | Regenerates every table into `results/tables/` |
 
 ## `build_benchmark/`: recreating the benchmark
 
@@ -134,21 +153,46 @@ Important subdirectories:
 
 See `build_benchmark/README.md` for the exact environment variables, commands, Hugging Face dataset paths, and configuration files.
 
-## `experiments/`: paper analyses and supporting experiments
+## Repository layout
 
-The `experiments/` directory contains the scripts used for the paper analyses and supporting experiments. It is mainly intended for reproducing figures, tables, and additional analyses from the SABER-Math paper.
+There is no separate `experiments/` tree. Analysis code lives with the source
+it depends on, and every result lives under one `results/` root.
 
-The `experiments/README.md` file maps each analysis to its corresponding directory and explains the expected inputs for the scripts. The main experiment locations are:
-
-| Location | Experiment stored there |
+| Path | Contents |
 |---|---|
-| `experiments/bechmark_analysis/` | Benchmark and source-corpus composition analysis, including domain and subdomain distribution plots. |
-| `experiments/additional_experiments/` | Extra construction-pipeline analyses, including Swiss-tournament inversion studies and the effect of topic-only, solution-only, and combined candidate-selection signals. |
-| `experiments/math-vs-word/` | Experiments comparing whether retrievers rely more on mathematical notation or surrounding natural-language text. |
-| `experiments/confidence_intervals/` | Bootstrap confidence intervals for retrieval results and scripts for formatting them into LaTeX tables. |
-| `experiments/mteb_comparison/` | Correlation analysis between SABER-Math performance and general-purpose MTEB retrieval scores. |
+| `src/sabermath/` | The benchmark package: `evaluate`, processors, metrics |
+| `src/sabermath/registry.py` | Every model key, its processor recipe, its input protocol |
+| `src/sabermath/runner.py` | Running one (model, prompt) cell, with checkpointing |
+| `src/sabermath/results.py` | Reading `results/`: filename grammar and protocol precedence |
+| `src/sabermath/reporting/` | Table generators, one module per table |
+| `src/sabermath/analysis/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, latency and math-vs-word figures, benchmark composition |
+| `scripts/` | The four run endpoints, the report endpoint, and cluster launchers |
+| `scripts/slurm/`, `scripts/envs/` | SLURM job files and per-family conda environments |
+| `scripts/diagnostics/` | Backend-equivalence and input-format sweeps |
+| `results/` | Every result (see below) |
+| `docs/` | Protocol notes and per-experiment write-ups |
 
-Most experiment scripts assume that the required datasets, vector caches, or intermediate JSON/CSV files already exist at the paths specified in the local config files or command-line arguments. For detailed commands and file-level explanations, see the README files inside `experiments/` and its subdirectories.
+### `results/`
+
+| Path | Contents |
+|---|---|
+| `results/evaluation/` | Every nDCG run, `<model>__<prompt>.json` |
+| `results/timing/` | Per-query latency |
+| `results/dedup/` | Deduplication rankings |
+| `results/confidence/` | Bootstrap confidence intervals |
+| `results/rescaled/`, `results/rescaling/` | Relevance-rescaling robustness |
+| `results/math_vs_word/` | Similarity dumps and figures |
+| `results/latency/` | Latency-vs-quality figure data |
+| `results/diagnostics/` | Backend-equivalence verdicts |
+| `results/tables/` | Generated tables |
+
+Every evaluation run records the protocol that produced it, so which run backs
+a given table row is decided by the run's own metadata rather than by which
+directory it sits in. Regenerate every table with:
+
+```bash
+python scripts/report_experiments.py
+```
 
 ## License
 
