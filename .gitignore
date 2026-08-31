@@ -1,16 +1,25 @@
 __pycache__/
 *.egg-info
 
-results/
+# Results are tracked, EXCEPT the bulk artifacts. The small per-run JSONs are
+# the paper's evidence and belong in git; the things excluded below are
+# regenerable, enormous, or both.
+results/**/.checkpoints/
+results/**/.cache/
+results/**/.rewrites/
+results/diagnostics/vllm_feasibility/merged/
+*.json.tmp
+*.json.lock
+
+# Superseded data staged for deletion by the 2026-08-31 refactor.
+.superseded/
+
 logs/
 models/
 venv/
+.venv/
 .vector.cache/
 .cache/
-testing
 .hftok
 .openroutertok
 .geminitok
-
-*.sh
-*.slurm
