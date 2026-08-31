@@ -50,6 +50,7 @@ def _write(out: Path, payload: dict) -> None:
     tmp.write_text(json.dumps(payload, indent=2))
     tmp.replace(out)
 
+
 def load_evaluation_parts(paths: list[Path]) -> tuple[str, list[dict]]:
     parts, model_keys = [], set()
     for p in paths:

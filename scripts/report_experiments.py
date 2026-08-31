@@ -23,11 +23,27 @@ MTEB_CSV = DEFAULT_MTEB_CSV
 
 def _run(label: str, script: str, argv: list[str], optional: bool = False) -> bool:
     print(f"\n{'=' * 70}\n== {label}\n{'=' * 70}")
-    completed = subprocess.run([sys.executable, str(ROOT / script), *argv], cwd=ROOT)
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / script), *argv],
+        cwd=ROOT,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     if completed.returncode == 0:
         return True
-    note = "inputs not ready yet - skipped" if optional else "FAILED"
+    # Say WHY. An `optional` generator whose inputs are genuinely missing and
+    # one that crashed both exit non-zero, and reporting either as "inputs not
+    # ready" hides real breakage - a ModuleNotFoundError read as a missing
+    # sweep for a whole session.
+    reason = ""
+    for line in reversed((completed.stderr or "").strip().split("\n")):
+        if line.strip():
+            reason = line.strip()
+            break
+    note = "skipped" if optional else "FAILED"
     print(f"[~] {label}: {note} (exit {completed.returncode})")
+    if reason:
+        print(f"    {reason}")
     return False
 
 
