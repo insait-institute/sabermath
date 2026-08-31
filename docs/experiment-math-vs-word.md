@@ -11,12 +11,12 @@ Run the scripts in the order below.
 ## 1. Standardize LaTeX formatting
 
 ```bash
-python -m sabermath.analysis.math_vs_word.fix_latex
+python scripts/analysis/fix_latex.py
 ```
 
 This reads the target and candidate datasets named in
-`src/sabermath/analysis/math_vs_word/config.yaml`, which is resolved next to
-the module - pass `--config_file` only to use a different one.
+`scripts/config/math_vs_word.yaml`, which is resolved next to
+the module - pass `--config-file` only to use a different one.
 
 It uses an LLM prompt to standardize the LaTeX formatting for:
 
@@ -31,7 +31,7 @@ The processed outputs are written to new Hugging Face datasets. Make sure the re
 ## 2. Extract equation-only and word-only content
 
 ```bash
-python -m sabermath.analysis.math_vs_word.strip_words_and_math
+python scripts/analysis/strip_words_and_math.py
 ```
 
 This script performs regex-based extraction of:
@@ -46,7 +46,7 @@ It processes every target and every relevant candidate, then writes the extracte
 ## 3. Compute embedding similarities
 
 ```bash
-python -m sabermath.analysis.math_vs_word.calc_sims --method <METHOD>
+python scripts/analysis/math_vs_word.py --method <METHOD>
 ```
 
 The <METHOD> argument can be either a model id written exactly as in the list below, or one of 'jaccard', 'tf-idf', 'bm25' or 'approach0'. These are four non-embedding retrieval methods we also evaluate in our main experiment.
@@ -72,7 +72,7 @@ The output filename is based on the embedding model name.
 Example:
 
 ```bash
-python -m sabermath.analysis.math_vs_word.calc_sims --method "Qwen/Qwen3-Embedding-8B"
+python scripts/analysis/math_vs_word.py --method "Qwen/Qwen3-Embedding-8B"
 ```
 
 ### How the models are called
@@ -110,14 +110,14 @@ families need their own - see
 [experiment-evaluation.md](experiment-evaluation.md)):
 
 ```bash
-python -m sabermath.analysis.math_vs_word.calc_sims --method <METHOD>
-python -m sabermath.analysis.math_vs_word.calc_sims --method <METHOD> --force_recalc
+python scripts/analysis/math_vs_word.py --method <METHOD>
+python scripts/analysis/math_vs_word.py --method <METHOD> --force-recalc
 ```
 
 Runs write into `results/math_vs_word/similarities/`, one file per method, so
 methods are independent and a failure never blocks the rest. Long runs can be
 split and reassembled with
-`python -m sabermath.analysis.math_vs_word.merge_sim_parts`.
+`python scripts/analysis/math_vs_word_merge.py`.
 
 Credentials are read from token files at the repo root: `.hftok`,
 `.geminitok`, `.openroutertok` (all gitignored). An exported `GEMINI_API_KEY`
@@ -128,7 +128,7 @@ stale one would otherwise slip through.
 ### Instruction ablation (optional)
 
 ```bash
-python -m sabermath.analysis.math_vs_word.calc_sims --method <MODEL_ID> --instruction p1
+python scripts/analysis/math_vs_word.py --method <MODEL_ID> --instruction p1
 ```
 
 The instruction is wrapped onto the query with
@@ -144,7 +144,7 @@ Two things to be careful about:
 
 - **`p0` is the default arm.** `similarities/<method>.json` and
   `<method>__p0.json` are the same run, for every model.
-  `check_coverage --arms p0 --emit-commands` prints `cp` commands rather
+  `math_vs_word_coverage.py --arms p0 --emit-commands` prints `cp` commands rather
   than run commands for exactly that reason.
 - **Some models must NOT get the generic wrap.** ReasonIR takes the
   instruction as an `encode()` argument and masks those tokens out of its
@@ -155,7 +155,7 @@ Two things to be careful about:
   `bm25` and `approach0` are the ablation's control rows and `--instruction`
   is refused for them.
 
-`check_coverage --arms p0 p1 p2 p3 --emit-commands` reports which arms are
+`math_vs_word_coverage.py --arms p0 p1 p2 p3 --emit-commands` reports which arms are
 missing and prints the exact command for each.
 
 ### The pre-2026-08-26 numbers
@@ -171,9 +171,9 @@ remaining way to compare against them.
 ## Supported model IDs
 
 The authoritative roster is
-`sabermath.analysis.math_vs_word.load_models.ALLOWED_MODELS` (44 methods as of
+`sabermath.math_vs_word.load_models.ALLOWED_MODELS` (44 methods as of
 2026-08-26: 40 models plus the four lexical controls). Run
-`python -m sabermath.analysis.math_vs_word.check_coverage` to print it along with which methods have a
+`python scripts/analysis/math_vs_word_coverage.py` to print it along with which methods have a
 complete result.
 
 The 17 below were the original math-vs-word roster; the rest of the paper's
@@ -206,7 +206,7 @@ jinaai/jina-embeddings-v5-text-nano
 ## 4. Plot ordering histograms
 
 ```bash
-python -m sabermath.analysis.math_vs_word.plot_hist --all   # --all is optional
+python scripts/plots/plot_math_vs_word.py --all   # --all is optional
 ```
 
 In the case when an --all argument is passed, the plot is computed for all methods (embedding models and retrieval methods). In the general case only specific models and methods are plotted for visual clarity.

@@ -1,42 +1,3 @@
-"""AQ-MedAI/Diver-GroupRank-32B: a groupwise reasoning reranker served via
-vLLM.
-
-The model is fed the query together with a small group of candidate documents
-(each tagged with a numerical identifier), generates a reasoning chain inside
-<reason>...</reason>, and emits per-document integer relevance scores (0-10)
-as JSON inside <answer>...</answer>. This follows the officially supplied
-inference code from the Hugging Face model card and the reference
-implementation in the Diver GitHub repo (Reranker/rerank_groupwise.py at
-https://github.com/AQ-MedAI/Diver): same system/user prompts, same vLLM setup
-(dtype=bfloat16, max_model_len=32000), same SamplingParams (temperature=0.3,
-top_p=0.8, max_tokens=8000), same JSON-repair parsing, same failure handling
-(a group whose output can't be parsed contributes score 0 for all its
-documents in that epoch), and the same multi-epoch reshuffle-and-average
-scheme (their `repeat_num`/`num_epoch`).
-
-Deviations from the reference, all deliberate:
-- Shuffling is seeded deterministically per (query, epoch) instead of from
-  one shared global `random.seed(666)` stream, so a checkpointed run that
-  resumes mid-benchmark regroups each query identically to the original
-  attempt (the reference's global stream makes grouping depend on how many
-  queries were processed before it).
-- SamplingParams gets an explicit `seed` for the same reproducibility reason
-  (temperature=0.3 sampling is otherwise nondeterministic across runs). This
-  does not change the sampling distribution the reference uses.
-- Each document is additionally token-truncated so the full group prompt is
-  guaranteed to fit max_model_len minus the generation budget. The reference
-  only caps documents at 3000 characters (kept here too, applied first),
-  which is enough for BRIGHT's passages but not for SABER-Math's longer
-  problem+solution documents in a 20-document group.
-- `logprobs=10` is dropped from SamplingParams - the reference requests it
-  but never reads it.
-
-Defaults use their eval group size (group_size=20, disjoint groups) with
-repeat_num=2 (the reference implementation's default; their BRIGHT eval
-script used repeat_num=6 - pass repeat_num=6 to reproduce that exactly, at
-3x the generation cost).
-"""
-
 import json
 import random
 import re
@@ -92,9 +53,6 @@ The reasoning process and answer are enclosed within <reason> </reason> and <ans
 
 
 def extract_group_scores(output_str: str) -> dict:
-    """Parse the {"[1]": 5, ...} JSON from a model completion, including the
-    reference implementation's repair steps for common formatting mistakes.
-    Raises ValueError if no usable JSON can be recovered."""
     if output_str is None:
         raise ValueError("empty output")
 
@@ -187,9 +145,6 @@ class GroupRankProcessor(ModelProcessor):
         )
 
     def _truncate_doc(self, document: str) -> str:
-        """The reference's 3000-char cap plus a token-level guarantee that a
-        full group of documents (plus prompt scaffolding and the generation
-        budget) fits inside max_model_len."""
         document = re.sub(r"\n+", " ", document)[: self._max_doc_chars]
         # ~1024 tokens covers the system prompt, user template, chat-template
         # wrapping, and per-document "[i]. " markers for a 20-document group.

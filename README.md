@@ -128,7 +128,7 @@ all:
 |---|---|---|
 | `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms | [evaluation](docs/experiment-evaluation.md), [instructions](docs/experiment-instructions.md) |
 | `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | [dedup](docs/experiment-dedup.md) |
-| `scripts/run_timing.py` | Per-query latency on production backends | [latency](docs/experiment-latency.md) |
+| `scripts/run_timing.py` | Per-query latency on production backends | [timing](docs/experiment-timing.md), [latency](docs/experiment-latency.md) |
 | `scripts/report_experiments.py` | Regenerates every table into `results/tables/` | [overview](docs/experiments-overview.md) |
 
 A slow model can be split across concurrent jobs with `--query-shards N
@@ -169,9 +169,9 @@ it depends on, and every result lives under one `results/` root.
 | `src/sabermath/runner.py` | Running one (model, prompt) cell, with checkpointing |
 | `src/sabermath/results.py` | Reading `results/`: filename grammar and protocol precedence |
 | `src/sabermath/reporting/` | Table generators, one module per table |
-| `src/sabermath/analysis/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, latency and math-vs-word figures, benchmark composition |
+| `src/sabermath/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, latency and math-vs-word figures, benchmark composition |
 | `src/sabermath/shards.py` | Splitting one run across jobs, and stitching it back |
-| `scripts/` | The four endpoints, and nothing else |
+| `scripts/` | Every entrypoint, and nothing else — the package itself is import-only |
 | `scripts/envs/` | The five conda environments, one per conflicting pin set |
 | `results/` | Every result (see below) |
 | `docs/` | Per-experiment write-ups and protocol notes (see [Documentation](#documentation)) |

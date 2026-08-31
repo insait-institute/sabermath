@@ -1,33 +1,22 @@
 #!/usr/bin/env python3
-"""Regenerate every SABER-Math table. THE endpoint for reporting.
-
-    python scripts/report_experiments.py                 # everything
-    python scripts/report_experiments.py main timing     # just these
-    python scripts/report_experiments.py --list
-    python scripts/report_experiments.py --out-dir /tmp/tables
-    python scripts/report_experiments.py mteb --mteb-file leaderboard.csv
-
-Safe to run at any point. Each generator reports how many rows it could fill
-and where each row came from, so a partially-finished sweep produces a partial
-table rather than a wrong one, and a generator whose inputs are missing is
-skipped with a note instead of failing the run.
-
-Every table reads from results/ and writes into results/tables/.
-
-PROTOCOL PRECEDENCE is not a directory convention any more. All evaluation
-runs live in one folder and each records the protocol that produced it, so
-which run backs a row is decided by the run itself (see
-sabermath.results.run_rank). Copying a result file somewhere cannot change a
-published number.
-"""
-
 import argparse
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
+USAGE = """\
+  python scripts/report_experiments.py                 # everything
+  python scripts/report_experiments.py main timing     # just these
+  python scripts/report_experiments.py --list
+  python scripts/report_experiments.py --out-dir /tmp/tables
+  python scripts/report_experiments.py mteb --mteb-file leaderboard.csv
+
+Safe to run at any point: a generator whose inputs are missing is skipped with
+a note, and a partially-finished sweep gives a partial table, not a wrong one.
+"""
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 RESULTS = Path("results")
 DEFAULT_OUT = RESULTS / "tables"
@@ -38,10 +27,11 @@ DEFAULT_MTEB_CSV = RESULTS / "mteb" / "leaderboard.csv"
 MTEB_CSV = DEFAULT_MTEB_CSV
 
 
-def _run(label: str, argv: list[str], optional: bool = False) -> bool:
-    """Run one generator as a subprocess so one failure cannot abort the rest."""
+# Each generator is its own script, run in its own process, so one failing
+# never aborts the rest of the report.
+def _run(label: str, script: str, argv: list[str], optional: bool = False) -> bool:
     print(f"\n{'=' * 70}\n== {label}\n{'=' * 70}")
-    completed = subprocess.run([sys.executable, *argv], cwd=ROOT)
+    completed = subprocess.run([sys.executable, str(ROOT / script), *argv], cwd=ROOT)
     if completed.returncode == 0:
         return True
     note = "inputs not ready yet - skipped" if optional else "FAILED"
@@ -49,12 +39,7 @@ def _run(label: str, argv: list[str], optional: bool = False) -> bool:
     return False
 
 
-def _module(name: str) -> list[str]:
-    return ["-m", f"sabermath.{name}"]
-
-
 def report_confidence(out_dir: Path) -> bool:
-    """Recompute the bootstrap CIs the main tables read. Must run first."""
     p0 = sorted((RESULTS / "evaluation").glob("*__p0.json"))
     if not p0:
         print("[~] no p0 runs found - skipping CI recompute")
@@ -64,8 +49,7 @@ def report_confidence(out_dir: Path) -> bool:
         completed = subprocess.run(
             [
                 sys.executable,
-                "-m",
-                "sabermath.analysis.compute_confidence_intervals",
+                str(ROOT / "scripts/analysis/compute_confidence_intervals.py"),
                 str(path),
                 "--out-dir",
                 str(RESULTS / "confidence"),
@@ -81,15 +65,16 @@ def report_confidence(out_dir: Path) -> bool:
 def report_main(out_dir: Path) -> bool:
     return _run(
         "main tables (statement-full, statement-statement, full-full)",
-        _module("reporting.main_tables") + ["--out-dir", str(out_dir)],
+        "scripts/tables/main_tables.py",
+        ["--out-dir", str(out_dir)],
     )
 
 
 def report_instructions(out_dir: Path) -> bool:
     return _run(
         "instruction ablation",
-        _module("reporting.instruction_tables")
-        + ["--out", str(out_dir / "RESULTS_instructions.md")],
+        "scripts/tables/instruction_tables.py",
+        ["--out", str(out_dir / "RESULTS_instructions.md")],
         optional=True,
     )
 
@@ -97,8 +82,8 @@ def report_instructions(out_dir: Path) -> bool:
 def report_instructions_statement_full(out_dir: Path) -> bool:
     return _run(
         "instruction ablation (statement-full, with pooled shards)",
-        _module("reporting.instruction_statement_full")
-        + ["--out-dir", str(out_dir)],
+        "scripts/tables/instruction_statement_full.py",
+        ["--out-dir", str(out_dir)],
         optional=True,
     )
 
@@ -106,16 +91,16 @@ def report_instructions_statement_full(out_dir: Path) -> bool:
 def report_timing(out_dir: Path) -> bool:
     return _run(
         "per-query latency",
-        _module("reporting.timing_tables")
-        + ["--out", str(out_dir / "RESULTS_timing.md")],
+        "scripts/tables/timing_tables.py",
+        ["--out", str(out_dir / "RESULTS_timing.md")],
     )
 
 
 def report_dedup(out_dir: Path) -> bool:
     return _run(
         "deduplication",
-        _module("reporting.dedup_tables")
-        + ["--out", str(out_dir / "RESULTS_dedup.md")],
+        "scripts/tables/dedup_tables.py",
+        ["--out", str(out_dir / "RESULTS_dedup.md")],
         optional=True,
     )
 
@@ -123,8 +108,8 @@ def report_dedup(out_dir: Path) -> bool:
 def report_rescaling(out_dir: Path) -> bool:
     return _run(
         "relevance-rescaling robustness",
-        _module("analysis.rescaling")
-        + [
+        "scripts/analysis/rescaling.py",
+        [
             "--from-rankings",
             str(RESULTS / "rescaling" / "rankings.npz"),
             "--latex",
@@ -135,20 +120,14 @@ def report_rescaling(out_dir: Path) -> bool:
 
 
 def report_mteb(out_dir: Path) -> bool:
-    """Correlate SABER-Math against MTEB Retrieval.
-
-    Needs a leaderboard CSV (Model, Retrieval columns), which is not
-    redistributable and so is not in this repo. Drop an export at
-    DEFAULT_MTEB_CSV, or pass --mteb-file. The benchmark side is read live
-    from results/, so this can never correlate against stale numbers.
-    """
     if not MTEB_CSV.exists():
         print(f"[~] MTEB rank correlation: no leaderboard CSV at {MTEB_CSV} "
               "- skipped (see --mteb-file)")
         return True
     return _run(
         "MTEB rank correlation",
-        _module("analysis.mteb") + ["--mteb_file", str(MTEB_CSV)],
+        "scripts/analysis/mteb_correlation.py",
+        ["--mteb-file", str(MTEB_CSV)],
         optional=True,
     )
 
@@ -167,7 +146,7 @@ REPORTS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        epilog=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "reports",

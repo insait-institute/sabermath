@@ -18,11 +18,6 @@ AFFIX_KEYS = (
 
 
 def split_affix_kwargs(kwargs: dict) -> tuple[dict, dict]:
-    """Separate the per-side prompt/suffix/API-parameter keys understood by
-    EmbeddingProcessor.get_scores from kwargs that get forwarded into
-    encode(). Callers that bypass get_scores and call encode() directly
-    (scripts/run_dedup.py) must strip them, then apply the affixes to their
-    own query/document texts with apply_affixes below."""
     affixes = {k: v for k, v in kwargs.items() if k in AFFIX_KEYS}
     rest = {k: v for k, v in kwargs.items() if k not in AFFIX_KEYS}
     return affixes, rest
@@ -234,7 +229,6 @@ class EmbeddingProcessor(ModelProcessor):
     def encode(
         self, texts: list[str], show_progress_bar: bool = True, **kwargs
     ) -> np.ndarray:
-        """Encode a list of texts into a list of vectors."""
         pass
 
     def encode_statements(

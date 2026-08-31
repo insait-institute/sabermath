@@ -42,11 +42,6 @@ def _ensure_dir(file_path: str | Path) -> None:
 
 
 def _load_checkpoint(path: str | Path | None) -> dict[int, float | None]:
-    """Load a per-query nDCG checkpoint written by a previous (possibly
-    interrupted) evaluate_task() run. Returns {} if there is none yet, or if
-    the file is missing/corrupt (e.g. killed mid-write before the atomic
-    rename below could apply) - a bad checkpoint should never crash a run,
-    only cost it a restart from scratch."""
     if path is None:
         return {}
     p = Path(path)
@@ -62,9 +57,6 @@ def _load_checkpoint(path: str | Path | None) -> dict[int, float | None]:
 def _save_checkpoint(
     path: str | Path | None, all_ndcgs_by_idx: dict[int, float | None]
 ) -> None:
-    """Persist per-query nDCGs computed so far. Writes to a temp file and
-    renames it into place so a job killed mid-write can never leave a
-    truncated/corrupt checkpoint behind."""
     if path is None:
         return
     p = Path(path)
@@ -164,24 +156,6 @@ def evaluate_task(
     on_progress: Callable[[], None] | None = None,
     scores_path: str | Path | None = None,
 ) -> TaskResult:
-    """Evaluate one task.
-
-    If `checkpoint_path` is given, per-query nDCGs are written to it after
-    every query and reloaded from it on entry, so a run interrupted partway
-    (e.g. a job hitting a wall-clock limit) can be resumed by calling
-    evaluate_task() again with the same checkpoint_path instead of losing all
-    progress and restarting from query 0. This matters most for slow,
-    generative rerankers (e.g. rank1-32b) evaluated over hundreds of queries.
-    Do not reuse a checkpoint path across a differently-sized/ordered
-    queries_ds (e.g. after changing a query subsample) - the checkpoint is
-    keyed by query position, not by query content.
-
-    If `on_progress` is given, it's called (no args) right after every
-    freshly-computed (not resumed-and-skipped) query's checkpoint write -
-    e.g. to periodically snapshot partial results to a separate location, or
-    push them somewhere else. What it does is entirely up to the caller;
-    this file has no opinion on it.
-    """
     queries_ds = settings.queries_ds
     documents_ds = settings.documents_ds
     processor = settings.processor
@@ -358,7 +332,6 @@ def evaluate(
     tasks: list[Task] | None = None,
     k: int = 10,
     *,
-    # Init na Run Config
     dcg_variant: DCGVariant = "exponent",
     use_vllm: bool = False,
     init_kwargs: dict | None = None,
@@ -375,19 +348,14 @@ def evaluate(
     instruction: str | None = None,
     instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE,
     save_scores: bool = False,
-    # Printing Config
     verbose: bool = True,
     show_progress_bars: bool = True,
-    #       ! USE WITH CAUTION !
-    # ARGUMENTS BELOW ARE FOR DEV PURPOSES
-    # Cache Config
+    # Below here: development arguments, not part of the published protocol.
     cache_path: str | None = None,
     allow_export_cache: bool = True,
     allow_load_cache: bool = True,
-    # Benchmark Data Setting (Queries & Documents)
     queries: Dataset | None = None,
     documents: Dataset | None = None,
-    # Direct Input/Output
     return_ndcgs: bool = False,
     no_init: bool = False,
 ) -> Report:

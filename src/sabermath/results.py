@@ -1,30 +1,3 @@
-"""Reading the results directory: filename grammar, and protocol precedence.
-
-ONE FOLDER. Every evaluation run lands in results/evaluation/, whatever
-protocol or prompt produced it. That used to be four directories whose
-POSITION encoded which protocol a file belonged to, and which run superseded
-which - so a file copied to the wrong directory silently changed a published
-table, and the report generators had to be handed a directory list in the
-right order to be correct.
-
-Precedence now comes from the payload instead. Each result records its own
-protocol under reports[model].prompt, so `run_rank` below can rank two runs of
-the same cell without knowing where they sit on disk:
-
-    2  canonical  - reports[model].prompt.protocol == "canonical"
-    1  tagged     - a prompt block naming some other protocol
-    0  untagged   - no prompt block at all: a pre-2026-08-25 run, from before
-                    the vendor input envelopes were applied
-
-FILENAME GRAMMAR
-
-    <model>__<prompt>[__<protocol-tag>][__n<N>_seed<S>][__shard<i>of<n>][__part-<name>].json
-
-`parse_result_name` returns None for anything that does not match, which is
-how non-result files in the same directory (query_sample.json, a .provenance
-record) are skipped rather than misread.
-"""
-
 from __future__ import annotations
 
 import json
@@ -64,12 +37,6 @@ _NAME_RE = re.compile(
 
 
 def parse_result_name(stem: str) -> dict | None:
-    """Decompose a result filename stem, or None if it is not one.
-
-    The prompt key is REQUIRED: a bare "<model>.json" is a pre-p0-naming file
-    and is reported as such (run_rank 0) rather than being guessed at as p0,
-    because the two are not interchangeable for models whose p0 fills a vendor
-    instruction slot."""
     match = _NAME_RE.match(stem)
     if match is None:
         return None
@@ -89,12 +56,6 @@ def parse_result_name(stem: str) -> dict | None:
 
 
 def parse_unprompted_name(stem: str) -> dict | None:
-    """Decompose a pre-p0-naming "<model>[__subset][__shard][__part]" stem.
-
-    Returns None when the stem carries no model name at all. Callers must
-    treat the result as a p0 CANDIDATE only - see load_runs, which prefers the
-    payload's own recorded prompt key and never lets one of these outrank a
-    canonical run."""
     match = _LEGACY_NAME_RE.match(stem)
     if match is None:
         return None
@@ -119,14 +80,12 @@ def result_name(
     subset: str = "full",
     part: str | None = None,
 ) -> str:
-    """The inverse of parse_result_name, for the naming the runner writes."""
     suffix = "" if subset == "full" else f"__{subset}"
     part_suffix = f"__part-{part}" if part else ""
     return f"{model}__{instruction_key}{suffix}{part_suffix}.json"
 
 
 def report_of(payload: dict) -> tuple[str | None, dict | None]:
-    """(model_key, report) for a result payload, or (None, None)."""
     reports = payload.get("reports") or {}
     if not reports:
         return None, None
@@ -135,10 +94,6 @@ def report_of(payload: dict) -> tuple[str | None, dict | None]:
 
 
 def run_rank(payload: dict) -> int:
-    """How much this run supersedes another of the same cell. Higher wins.
-
-    Reads the payload's own protocol record rather than its location, so
-    moving a file between directories cannot change a table."""
     _, report = report_of(payload)
     if report is None:
         return 0
@@ -151,9 +106,6 @@ def run_rank(payload: dict) -> int:
 
 
 def is_complete(report: dict, task: str) -> tuple[bool, int, int]:
-    """(complete, scored, total) for one task of a report. A cell covering
-    fewer queries than the run's query set is marked, never silently averaged
-    into a table."""
     ndcgs = (report.get("ndcgs_by_task") or {}).get(task) or []
     total = len(ndcgs)
     scored = len([v for v in ndcgs if v is not None])
@@ -166,16 +118,6 @@ def load_runs(
     include_subsets: bool = False,
     include_parts: bool = False,
 ) -> dict[tuple[str, str], dict]:
-    """Every (model, prompt) cell in `scan`, best run per cell.
-
-    "Best" is the highest run_rank; ties go to the file that scored more
-    queries, then to the later mtime - so a finished run always beats a
-    partial snapshot of the same cell, whichever order they are read in.
-
-    Subset (--n) and part/shard files are excluded by default: they cover a
-    fraction of the query set and would otherwise sit in a table beside full
-    runs as if comparable.
-    """
     scan = Path(scan)
     best: dict[tuple[str, str], tuple[tuple, dict]] = {}
     if not scan.is_dir():

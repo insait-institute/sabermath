@@ -6,7 +6,7 @@ candidates, so this needs no model re-run: the stored rankings are replayed
 under each variant.
 
 ```bash
-python -m sabermath.analysis.rescore_ndcg --scan results/evaluation \
+python scripts/analysis/rescore_ndcg.py --scan results/evaluation \
   --variants linear:1.0 exponent:1.0 exponent:0.6 rank \
   --export-table results/rescaled/summary.json
 

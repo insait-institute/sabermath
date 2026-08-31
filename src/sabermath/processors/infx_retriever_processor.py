@@ -1,35 +1,3 @@
-"""INF-X-Retriever: infly's two-stage "Query Aligner + Dense Retriever"
-system (rank 1 on BRIGHT as of Dec 2025) - inf-query-aligner rewrites the
-query, inf-retriever-v1-pro embeds the rewrite (with the instruct prefix)
-against prefix-less documents.
-
-Every step below mirrors the team's own released pipeline, verified
-line-by-line against three sources on 2026-08-21: the official code at
-https://github.com/yaoyichen/INF-X-Retriever (rewrite_queries.py,
-retrievers.py, configs/prompts.json), the inf-query-aligner model card's
-usage snippet (identical to rewrite_queries.py), and the checkpoints'
-generation_config.json / config_sentence_transformers.json. Where our
-implementation deviates, the deviation is called out inline.
-
-The official pipeline, exactly:
-  1. rewrite_queries.py: chat-template generation with the aligner
-     (system = the stock Qwen assistant prompt; user = QUERY_WRITER_PROMPT
-     + the query in an "**Input Query:** / **Your Output:**" scaffold),
-     tokenized with truncation at 8192, model.generate(max_new_tokens=512)
-     - all other sampling knobs come from the checkpoint's
-     generation_config.json (do_sample=True, temperature=0.7, top_p=0.8,
-     top_k=20, repetition_penalty=1.05). The decoded text REPLACES the
-     original query ('line_rewrite["query"] = query_rewrite').
-  2. retrievers.py: queries = [instruction + t for t in texts] with the
-     single generic instruction from configs/prompts.json ("Instruct: Given
-     a web search query, retrieve relevant passages that answer the
-     query\\nQuery: " - the SAME string the retriever repo ships as its ST
-     "query" prompt; there are NO domain-specific instructions in the
-     released configs). Documents get no prefix. inf-retriever-v1-pro via
-     AutoModel(trust_remote_code), last_token_pool, L2 normalize, dot
-     product.
-"""
-
 import hashlib
 
 import numpy as np
@@ -67,16 +35,6 @@ RETRIEVER_QUERY_INSTRUCTION = (
 
 
 def build_inf_retriever_st(model_name: str = RETRIEVER_REPO):
-    """The validated inf-retriever-v1-pro SentenceTransformers load, shared
-    by the standalone benchmark entry (run_experiments.py's
-    _build_inf_retriever_processor, where the full rationale lives) and the
-    INF-X composition below. Short version of what's load-bearing:
-    auto-config load (the repo ships Transformer + lasttoken Pooling +
-    Normalize), trust_remote_code (bidirectional modeling_qwen.py AND the
-    EOS-appending tokenization_qwen.py), torch_dtype auto -> fp16 (the
-    checkpoint's declared dtype; ST default would compute fp32), and the
-    "message"-modality strip (this tokenizer ships a chat template - the
-    ST>=5.7 silent chat-wrapping latch that corrupted the RaDeR family)."""
     from sentence_transformers import SentenceTransformer
 
     st = SentenceTransformer(
@@ -93,65 +51,6 @@ def build_inf_retriever_st(model_name: str = RETRIEVER_REPO):
 
 
 class INFXRetrieverProcessor(ModelProcessor):
-    """The composed INF-X-Retriever system as one benchmark entry: rewrite
-    the query with inf-query-aligner, then delegate scoring of
-    (instruction + rewritten query) vs the untouched documents to the exact
-    same SentenceTransformersProcessor the standalone inf-retriever-v1-pro
-    entry uses - so the standalone-vs-INF-X comparison isolates the query
-    rewrite + instruct prefix, with the embedding backend held fixed.
-
-    Deviations from the official pipeline, all deliberate (found by a full
-    audit against a clone of the official repo on 2026-08-21 - constants
-    were verified BYTE-IDENTICAL programmatically: writer prompt, system
-    prompt, user scaffold, instruct prefix, 8192/512 limits):
-    - DETERMINISTIC SAMPLING: the official code seeds nothing, so its
-      rewrites (do_sample=True per generation_config) are irreproducible
-      run-to-run. We keep the official sampling parameters but seed each
-      generation from a hash of the query text, inside a fork_rng scope: a
-      given query always yields the same rewrite, independent of query
-      order - which checkpoint/resume reruns would otherwise change - while
-      still sampling from the distribution the aligner was tuned for
-      (greedy would NOT be faithful: temperature/top_p/top_k/
-      repetition_penalty ship in the checkpoint's own generation_config).
-      Relatedly, the official rewrite_queries.py generates in left-padded
-      batches (default 256); we generate one query per call - with
-      sampling, per-item distributions are unaffected.
-    - RETRIEVER DTYPE fp16, not the official eval's implicit fp32: their
-      retrievers.py calls AutoModel.from_pretrained with NO torch_dtype,
-      which in transformers 4.5x upcasts the fp16 checkpoint to fp32
-      compute. We keep the checkpoint's DECLARED fp16 (torch_dtype="auto")
-      - required by the 2026-08-21 precision-fairness policy (no model
-      computes in fp32), validated harmless for plain encoders (e5
-      fp16-vs-fp32: Spearman 1.0000), and it keeps this row's embedding
-      backend byte-identical to the standalone inf-retriever-v1-pro row.
-    - TRUNCATION AT 32768 not 8192 on the retriever side: the official
-      eval truncates query and document encodes at 8192 (doc_max_length
-      governs BOTH sides there - its query_max_length arg is dead code);
-      our ST load keeps the repo's native max_seq_length 32768. Immaterial
-      for this benchmark (only 0.32% of documents even exceed 2048 tokens)
-      and the ALIGNER input truncation at 8192 is kept exactly official.
-
-    NOT a deviation: the decoded rewrite is used as-is, no strip - the
-    official pipeline's released rewrite_data/*.json confirms every rewrite
-    keeps its leading space from decoding, and their retrieval embeds
-    instruction + that raw text just like we do.
-
-    Rewrites are cached by raw query text: within one run_experiments.py
-    process the statement-query set is scored under two tasks
-    (statement-statement + statement-full), and the rewrite must be
-    generated once and reused - both for cost and so the two tasks see the
-    same rewrite. When rewrite_log_path is set the cache is also persisted
-    as JSON ({original: rewritten}, plus a recipe fingerprint) - primarily
-    for AUDITABILITY (the first question a lower-than-standalone score
-    raises is "what did the aligner actually write?" - the official repo
-    ships its rewrite_data/ for exactly this reason), and secondarily as a
-    warm-start for resumed runs (safe: per-query seeding makes regeneration
-    byte-identical anyway; a fingerprint mismatch - different prompt/
-    aligner/seed scheme - discards the file rather than silently reusing
-    stale rewrites). get_scores' check_cache/update_cache kwargs govern the
-    rewrite cache exactly like the inner vector cache, so the timing
-    harness's check_cache=False measures true per-query rewrite cost.
-    """
 
     processor = "inf-x-retriever"
 
@@ -336,6 +235,4 @@ class INFXRetrieverProcessor(ModelProcessor):
         self._retriever.import_cache(path)
 
     def encode(self, texts: list[str], **kwargs) -> np.ndarray:
-        """Raw embedding access (no rewrite, no instruction) - the
-        retriever backend as-is, for parity checks/diagnostics."""
         return self._retriever.encode(texts, **kwargs)

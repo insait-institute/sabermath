@@ -13,10 +13,23 @@ source it depends on, and every result lives under one `results/` root.
 | `scripts/run_timing.py` | Per-query latency on production backends | `results/timing/` |
 | `scripts/report_experiments.py` | Every table, regenerated from the above | `results/tables/` |
 
-Each takes `--models`, defaulting to every model in the registry, and each
-`--help` is the authoritative reference for its own flags. There are no
-launchers and no job files: run an endpoint directly, in the right
+The three run endpoints take `--models`, defaulting to every model in the
+registry, and each `--help` is the authoritative reference for its own flags.
+There are no launchers and no job files: run a script directly, in the right
 environment.
+
+Every analysis and figure is its own script, and each one's `--help` documents
+it:
+
+| Path | Contents |
+|---|---|
+| `scripts/analysis/` | Confidence intervals, nDCG rescaling, MTEB correlation, tournament inversions, the math-vs-word similarity sweep |
+| `scripts/plots/` | One script per figure |
+| `scripts/tables/` | The generators `report_experiments.py` runs, in order |
+| `scripts/config/` | `tournament.yaml` and `math_vs_word.yaml` |
+
+Nothing under `src/` is runnable: the package is import-only and has no
+`__main__` block anywhere.
 
 ## Per-experiment write-ups
 
@@ -26,6 +39,7 @@ environment.
 | [experiment-instructions.md](experiment-instructions.md) | Does a task instruction help? The four prompt arms |
 | [experiment-dedup.md](experiment-dedup.md) | Where a rephrased copy of a query's own problem ranks |
 | [experiment-rescaling.md](experiment-rescaling.md) | Does the ranking survive a different gain or relevance scale? |
+| [experiment-timing.md](experiment-timing.md) | Per-query latency: the measurement protocol |
 | [experiment-latency.md](experiment-latency.md) | Latency vs. quality (figure 2) |
 | [experiment-confidence-intervals.md](experiment-confidence-intervals.md) | Bootstrap confidence intervals |
 | [experiment-math-vs-word.md](experiment-math-vs-word.md) | Do retrievers key on notation or on prose? |

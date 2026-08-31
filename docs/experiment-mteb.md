@@ -13,7 +13,7 @@ leaderboard CSV. It reports:
 They are **not** stored in this file or anywhere else in the analysis. The
 Overall column is read live from `results/evaluation/` through the same code
 path that builds the paper's main table
-(`sabermath.reporting.main_tables.build_rows`), so the correlation can never be
+(`sabermath.tables.build_rows`), so the correlation can never be
 computed against numbers the tables no longer report. Only the SABER-Math
 model key to MTEB leaderboard name mapping is hardcoded, in
 `MTEB_MODEL_NAMES`; a `None` there means there is no obvious MTEB counterpart
@@ -37,13 +37,13 @@ Rank (Borda) is only used as a duplicate tie-breaker. It is not used in the corr
 Run with all benchmark models:
 
 ```bash
-python -m sabermath.analysis.mteb --mteb_file path/to/mteb.csv
+python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv
 ```
 
 Run only with the newer presented models:
 
 ```bash
-python -m sabermath.analysis.mteb --mteb_file path/to/mteb.csv --new-models-only
+python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv --new-models-only
 ```
 
 `scripts/report_experiments.py mteb` runs the first form for you, using

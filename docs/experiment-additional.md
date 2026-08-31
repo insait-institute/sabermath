@@ -2,8 +2,8 @@
 
 Two checks on how the benchmark's relevance scores were produced. Both read
 the tournament configuration from
-`src/sabermath/analysis/config_additional.yaml`, resolved next to the module,
-so `--config_file` is only needed to point at a different one.
+`scripts/config/tournament.yaml`, so `--config-file` is only needed to point
+at a different one.
 
 The pipeline these analyse is in `build_benchmark/` — see
 [`build_benchmark/README.md`](../build_benchmark/README.md) for the Swiss
@@ -18,18 +18,18 @@ the reduced tournament converges on the full one — which is what justifies
 running the reduced one.
 
 ```bash
-python -m sabermath.analysis.inversions \
-    --output_json final_results.json \
-    --matches_save_file matches_res_inv.csv \
-    --num_rounds 50
+python scripts/analysis/inversions.py \
+    --output-json final_results.json \
+    --matches-save-file matches_res_inv.csv \
+    --num-rounds 50
 
-python -m sabermath.analysis.plot_inversions --results_json final_results.json
+python scripts/plots/plot_inversions.py --results-json final_results.json
 ```
 
-`--num_rounds 50` matches the rounds used in the Swiss tournament
-experiments. The run checkpoints into `--matches_save_file` every
-`--checkpoint_every` rounds and resumes from it, so an interrupted run does
-not restart; `--force_recalc` ignores an existing checkpoint.
+`--num-rounds 50` matches the rounds used in the Swiss tournament
+experiments. The run checkpoints into `--matches-save-file` every
+`--checkpoint-every` rounds and resumes from it, so an interrupted run does
+not restart; `--force-recalc` ignores an existing checkpoint.
 
 ## Selection-signal effect
 
@@ -40,8 +40,8 @@ candidates, separating candidates found by topic only, by solution summary
 only, and by both.
 
 ```bash
-python -m sabermath.analysis.signal_effect
+python scripts/analysis/signal_effect.py
 ```
 
 Restrict it to one domain with any one of `--algebra`, `--geometry`,
-`--combinatorics`, `--calculus`, `--number_theory`.
+`--combinatorics`, `--calculus`, `--number-theory`.

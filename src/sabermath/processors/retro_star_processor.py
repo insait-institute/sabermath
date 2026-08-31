@@ -1,55 +1,3 @@
-"""Retro* (ljw13/retro-star-qwen3-{8b,32b}-0928): a GENERATIVE POINTWISE
-reranker served via vLLM.
-
-For each (query, document) pair the model is asked - in one chat turn - to
-analyze the query, analyze the document, and conclude with an integer
-relevance score in 0-100 wrapped in <score></score> tags. The parsed integer
-IS the relevance score; there is no logprob head (contrast Rank1Processor,
-which reads P(true) off the final-token logprobs).
-
-Every constant below is transcribed from the team's own released evaluation
-code, not from the model card's abbreviated snippet - fetched and read on
-2026-08-28 from
-https://github.com/VectorSpaceLab/agentic-search, files
-`Retro-star/evaluation/bright/reranker_sglang.py` (SGLangReasoningLLMReranker:
-prompt template, sampling params, truncation, score parsing/aggregation) and
-`Retro-star/evaluation/bright/reranker_prompts.py`
-(ReasoningBrightShortInstructions: the per-dataset query_type/doc_type/
-relevance_definition triples). PROMPT_TEMPLATE is byte-identical to
-`get_prompt_template()` there.
-
-Where this differs from the model card: the card's snippet uses
-max_new_tokens=1024, but the released BRIGHT scripts
-(`scripts/.../100@1-30@16-retro-star-qwen3-8b-0928.sh`) pass
---reranker_max_new_tokens 4096, so 4096 is the protocol default here.
-
-RELEVANCE DEFINITION. This prompt has no "no instruction" mode - a relevance
-definition is a required slot, and the vendor ships one per BRIGHT dataset.
-We use their `aops` triple verbatim (query = "math problem", document =
-"math problem solution"), which is the exact shape of this benchmark's
-statement-full task: a problem statement scored against problem+solution
-documents. Note the mismatch on the OTHER two tasks - statement-statement
-documents carry no solution, and full-full queries carry one - the doc_type
-string is simply less accurate there; it is left alone rather than varied
-per task, so one model's rows stay mutually comparable and match a real
-vendor configuration.
-
-DEVIATIONS, both deliberate:
-  - BACKEND: vLLM, not SGLang (this repo has one serving stack, pinned in
-    scripts/envs/env_vllm.yml). The generation contract is
-    reproduced knob for knob: n/temperature/top_k/repetition_penalty/
-    max_new_tokens/skip_special_tokens/spaces_between_special_tokens, the
-    same chat template with enable_thinking=False, and the same
-    context_length - max_new_tokens - 128 prompt budget.
-  - SEEDING: the official code seeds the ENGINE once (sglang
-    random_seed=42), which makes a run reproducible only if batching is
-    also identical - it is not, across a checkpoint/resume. We seed each
-    REQUEST from a hash of its own (query, document) text instead, so a
-    given pair scores identically regardless of batch composition, query
-    order, or where a resumed run picks up. Same policy, same reason, as
-    INFXRetrieverProcessor's per-query rewrite seeding.
-"""
-
 import hashlib
 import re
 from typing import ClassVar
@@ -166,21 +114,14 @@ class RetroStarProcessor(ModelProcessor):
 
         self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
         # No dtype pin: the checkpoint declares bfloat16 and vLLM's "auto"
-        # keeps it. (rank1's float16 pin is inherited from ITS model card;
-        # nothing in Retro*'s asks for a downcast.)
+        # keeps it.
         #
-        # disable_custom_all_reduce defaults ON here because vLLM's custom
-        # all-reduce kernel does NOT work on this cluster at tp=4. Observed
-        # (job 761561, msp3-2, 32B at tp=4): all four workers print
-        #   Failed: Cuda error .../custom_all_reduce.cuh:455 'invalid argument'
-        # during kernel warmup, a worker then dies with exit code None (a
-        # signal, no Python exception), and engine init fails with the
-        # misleading "Engine core initialization failed" / shm_broadcast
-        # "cancelled" further up the stack. That kernel needs working
-        # peer-to-peer access between every pair of GPUs in the group; the
-        # tp=2 8B run on msp3-4 is unaffected, so this is specific to the
-        # wider group. Falling back to NCCL costs a little all-reduce latency
-        # and nothing else. Pass False only on a node where P2P is known good.
+        # disable_custom_all_reduce defaults ON because vLLM's custom
+        # all-reduce kernel needs working peer-to-peer access between every
+        # pair of GPUs in the group, and where that is missing it fails during
+        # kernel warmup with a misleading "Engine core initialization failed".
+        # Falling back to NCCL costs a little latency and nothing else. Pass
+        # False only where P2P is known good.
         self._llm = LLM(
             model=self._model_name,
             tensor_parallel_size=self._tensor_parallel_size,
@@ -207,11 +148,6 @@ class RetroStarProcessor(ModelProcessor):
         )
 
     def _truncate(self, text: str) -> str:
-        """_truncate_texts() with max_length=max_prompt_length, the official
-        default when no per-side truncation limit is configured. Never fires
-        on this benchmark (the longest document is ~6k tokens against a
-        28544-token budget), but kept so the two paths cannot diverge on a
-        longer corpus."""
         ids = self._tokenizer(text)["input_ids"]
         if len(ids) <= self._max_prompt_length:
             return text
@@ -242,10 +178,6 @@ class RetroStarProcessor(ModelProcessor):
         return int.from_bytes(digest[:4], "big")
 
     def _parse_score(self, text: str) -> int:
-        """`int(re.search(...).group(1))`, 0 on any failure - the official
-        `except: score += 0`. A miss means the model never emitted a
-        parseable <score> tag (usually: it ran out of max_new_tokens
-        mid-analysis), and the vendor treats that as minimum relevance."""
         match = SCORE_PATTERN.search(text)
         if match is None:
             return 0
@@ -271,9 +203,8 @@ class RetroStarProcessor(ModelProcessor):
         inputs = [self._build_input(query, doc) for doc in documents]
         params = [self._seed_for(query, doc) for doc in documents]
 
-        # Production default (batch_size=None): one generate call over all of
-        # this query's candidates, vLLM schedules internally - same shape as
-        # Rank1Processor. batch_size exists for the timing harness.
+        # Production default (batch_size=None) is one generate call over all
+        # of this query's candidates; batch_size exists for the timing harness.
         step = batch_size or len(inputs)
         outputs = []
         for start in range(0, len(inputs), step):
@@ -294,35 +225,6 @@ class RetroStarProcessor(ModelProcessor):
 
 
 class RetroStarRewrittenProcessor(ModelProcessor):
-    """Retro* scoring the REWRITTEN query instead of the raw problem
-    statement - Reason-Rewriter feeding the reranker rather than the
-    retriever.
-
-    THIS IS OUR OWN CONSTRUCTION, NOT THE VENDOR'S PIPELINE, and the
-    distinction is easy to get wrong. In BGE-Reasoner the rewrite drives
-    RETRIEVAL only: their rerank stage's data loader
-    (Retro-star/evaluation/bright/data_loader.py) reads the ORIGINAL queries
-    from `xlangai/bright`, and `--retrieval_split
-    reasoner-rewritten-query-0821` merely selects which search results to
-    rerank. Reproducing that faithfully on this benchmark would be a no-op:
-    every query here has a FIXED 150-document candidate set, so there is no
-    retrieval stage for a rewrite to influence, and Retro* would see exactly
-    the same query and the same candidates as the plain retro-star-* row.
-    This entry therefore asks a DIFFERENT question - does a long
-    reasoning-style query help a generative reranker score pairs? - and its
-    number must not be reported as the vendor's cascade.
-
-    The rewrites are the very same ones the reason-rewriter-reason-embed-8b
-    row used: same processor, same recipe fingerprint, same log file. With
-    that log present every query is a cache hit, so the 7B generator is
-    never loaded and this run costs no more than a plain Retro* run.
-
-    Which of the five samples: index 0. The five exist so their EMBEDDINGS
-    can be averaged (see ReasonRewriterProcessor fact 2); a generative
-    reranker consumes one text and cannot average, and scoring all five
-    would multiply an already per-pair generation cost by five. Sample 0 is
-    deterministic given the per-query seed.
-    """
 
     processor: ClassVar[str | None] = "retro-star-rewritten"
 
@@ -342,10 +244,9 @@ class RetroStarRewrittenProcessor(ModelProcessor):
 
         self._rewrite_sample = rewrite_sample
         self._require_cached = require_cached_rewrites
-        # Memory is split for the case where the log does NOT already cover a
-        # query and the 7B generator has to load beside the reranker. When
-        # every query is cached (the normal case) the generator never loads
-        # and the reranker simply uses less than it could.
+        # Split for the case where a query is NOT in the log and the generator
+        # has to load beside the reranker. When every query is cached the
+        # generator never loads and the reranker simply uses less.
         self._rewriter = ReasonRewriterProcessor(
             rewrite_log_path=rewrite_log_path,
             rewriter_gpu_memory_utilization=rewriter_gpu_memory_utilization,
@@ -362,17 +263,6 @@ class RetroStarRewrittenProcessor(ModelProcessor):
         return f"{self._rewriter._rewriter_name} + {self._retro.model}"
 
     def prefetch_rewrites(self, queries: list[str]) -> None:
-        """Harness hook (see sabermath.runner's prefetch step). With the
-        rewriter row's log in place this reports everything cached and
-        generates nothing.
-
-        require_cached_rewrites turns a missing rewrite into an immediate,
-        legible error instead of a confusing CUDA OOM. It exists for the 32B
-        variant, which claims most of the GPU for the reranker precisely
-        BECAUSE the generator is never expected to load; if a query were
-        missing, that generator would try to load into the sliver that is
-        left and die with an allocator message that says nothing about
-        rewrites."""
         if self._require_cached:
             missing = self._rewriter._missing(list(queries))
             if missing:

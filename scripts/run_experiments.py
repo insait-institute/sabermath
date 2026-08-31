@@ -1,60 +1,10 @@
 #!/usr/bin/env python3
-"""Evaluate SABER-Math models. This is THE endpoint for model evaluation.
-
-    # every model, no instruction (the main tables)
-    python scripts/run_experiments.py
-
-    # a subset
-    python scripts/run_experiments.py --models rank1-7b qwen3-reranker-4b
-
-    # the instruction ablation: four prompt arms per model
-    python scripts/run_experiments.py --prompts p0 p1 p2 p3
-
-    # smoke test on 20 random queries before a multi-hour run
-    python scripts/run_experiments.py --models rank1-32b --n 20
-
-    # split a slow model across 4 concurrent jobs, then stitch them back
-    python scripts/run_experiments.py --models rank1-32b --query-shards 4 --query-shard 0
-    python scripts/run_experiments.py --merge-shards
-
-    # one task only, as three concurrent jobs that will not race
-    python scripts/run_experiments.py --models rank1-32b --task statement-full \
-        --part-name statement-full
-
-    # list what is available
-    python scripts/run_experiments.py --list
-
-`--models` defaults to EVERY model in the registry, and `--prompts` defaults
-to p0 ("no instruction"), so a bare invocation reproduces the main tables. All
-results land in ONE directory - results/evaluation/ - named
-"<model>__<prompt>[__<subset>][__part-<name>].json". There is no separate
-production-vs-instruction split: p0 IS the production arm.
-
-DEPENDENCY ISOLATION. Most models run from one environment
-(scripts/envs/env_vllm.yml: vllm==0.26.0 + peft), but four families need
-their own and will fail loudly in the wrong one:
-
-    gte/reason-moderncolbert   scripts/envs/env_colbert.yml   (pylate pins ST 5.3.0)
-    splade-code-*              scripts/envs/env_splade.yml    (SparseEncoder)
-    inf-retriever-v1-pro       scripts/envs/env_inf_retriever.yml
-    inf-x-retriever            scripts/envs/env_inf_retriever.yml  (transformers 4.51.x)
-
-So `--models` defaulting to all is right for a report over finished runs, but
-in a single shared environment run one model, or one same-env family, per
-invocation. Each model runs in its own spawned subprocess either way, so a
-crash or OOM never corrupts results already written.
-
-RESUMING. Every task checkpoints after each query. Re-running the identical
-command resumes from the last completed query - the reason a 32B generative
-reranker is evaluable here at all, given a bounded wall clock.
-"""
-
 import argparse
 import multiprocessing as mp
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sabermath import registry as R
 from sabermath.instructions import INSTRUCTIONS
@@ -64,6 +14,34 @@ from sabermath.shards import (
     merge_evaluation_shards,
     run_merge,
 )
+
+USAGE = """\
+  # every model, no instruction (the main tables)
+  python scripts/run_experiments.py
+
+  # a subset
+  python scripts/run_experiments.py --models rank1-7b qwen3-reranker-4b
+
+  # the instruction ablation: four prompt arms per model
+  python scripts/run_experiments.py --prompts p0 p1 p2 p3
+
+  # smoke test on 20 random queries before a multi-hour run
+  python scripts/run_experiments.py --models rank1-32b --n 20
+
+  # split a slow model across concurrent jobs, then stitch them back
+  python scripts/run_experiments.py --models rank1-32b --query-shards 4 --query-shard 0
+  python scripts/run_experiments.py --merge-shards
+
+  # one task only, as three concurrent jobs that will not race
+  python scripts/run_experiments.py --models rank1-32b --task statement-full \\
+      --part-name statement-full
+
+  # list what is available
+  python scripts/run_experiments.py --list
+
+Four model families need their own conda environment and fail loudly in the
+wrong one: see docs/experiment-evaluation.md and scripts/envs/.
+"""
 
 
 def _print_registry() -> None:
@@ -93,7 +71,7 @@ def _print_registry() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        epilog=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--models",

@@ -1,35 +1,9 @@
-"""Running one (model, prompt) cell of the benchmark, and keeping the result
-on disk safe against interruption.
-
-ONE CODE PATH. This module has a single run function, `run_cell`, and prompt
-key "p0" means "no instruction". The previous split - a production path with
-no prompt concept plus a parallel instruction-experiment path - was two
-near-copies of the same logic that wrote to two different result directories
-and disagreed about file naming; p0 collapses them, so a plain table run is
-just the p0 arm of the same sweep and lands in the same folder as every other
-arm.
-
-CHECKPOINTING. Every task is checkpointed after each query into
-"<save-to>/.checkpoints/<model>/<prompt>__<subset>/<task>.json". Re-running an
-identical command resumes from the last completed query instead of restarting
-- the failure mode that killed six of seven early rank1-32b attempts was a
-wall-clock timeout, not a bug, so resumability is the difference between a 32B
-model being evaluable and not.
-
-CONCURRENT WRITERS. Result files are merged under an flock and replaced
-atomically (write .tmp, rename), because several jobs legitimately target the
-same file: one job per --task, one per query shard, and a periodic progress
-snapshot racing them. A failed attempt never overwrites good data.
-"""
-
 from __future__ import annotations
 
 import contextlib
 import fcntl
 import json
-import os
 import random
-import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -48,11 +22,6 @@ from . import registry as R
 DEFAULT_SAVE_DIR = "results/evaluation"
 
 
-# ---------------------------------------------------------------------------
-# Result files
-# ---------------------------------------------------------------------------
-
-
 @contextlib.contextmanager
 def result_lock(filepath: Path):
     filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -66,11 +35,6 @@ def result_lock(filepath: Path):
 
 
 def merge_results(filepath: Path, model_key: str, new_output: dict) -> dict:
-    """Merge new_output into whatever's already saved at filepath, so writing
-    one --task slice never erases another already-saved slice for the same
-    model+prompt+subset. Tasks are merged by name - re-running one task
-    overwrites just that task's entry. A run that crashed entirely never
-    overwrites previously-successful data."""
     if not filepath.exists():
         return new_output
 
@@ -154,10 +118,6 @@ def write_meta(meta_path: Path, meta: dict) -> None:
 def partial_report_from_checkpoints(
     model_key: str, checkpoint_dir: Path, tasks: list[str], domains: list[list[str]]
 ) -> dict:
-    """Rebuild an in-progress snapshot straight from the checkpoint files
-    (each {query_idx: ndcg_or_null}), without waiting for evaluate() to
-    finish. Same shape as a real TaskResult, plus "n_done"/"n_total" so a
-    partial write is never mistaken for a finished one at a glance."""
     n_total = len(domains)
     tasks_out = []
     ndcgs_by_task = {}
@@ -215,54 +175,9 @@ def partial_report_from_checkpoints(
     }
 
 
-def sync_back_if_needed(save_dir: str | Path) -> None:
-    """Push save_dir back to the canonical host over rsync, callable from
-    inside the query loop (via on_progress) rather than only at process exit.
-    A no-op unless NEEDS_REGION_SYNC=1 is set (i.e. this node's home storage
-    isn't the canonical copy). Failures are logged, never raised - a flaky
-    sync must not crash a run that is otherwise making progress."""
-    if os.environ.get("NEEDS_REGION_SYNC") != "1":
-        return
-    host = os.environ.get("SABERMATH_CANONICAL_HOST", "hala")
-    path = os.environ.get("SABERMATH_CANONICAL_PATH", "/home/ivo_petrov/sabermath")
-    try:
-        # rsync exit 23/24 mean "some source files vanished or could not be
-        # read" - guaranteed here, because this very loop renames *.json.tmp
-        # into place while the transfer runs. Everything else did transfer, so
-        # those are successes; check=True would turn every one of them into a
-        # spurious failure and hide the real ones.
-        completed = subprocess.run(
-            [
-                "rsync",
-                "-auz",
-                "--exclude=*.tmp",
-                "--exclude=.*.??????",
-                f"{save_dir}/",
-                f"{host}:{path}/{save_dir}/",
-            ],
-            capture_output=True,
-            timeout=300,
-        )
-        if completed.returncode not in (0, 23, 24):
-            raise RuntimeError(
-                f"rsync exit {completed.returncode}: "
-                f"{completed.stderr.decode(errors='replace')[-400:]}"
-            )
-    except Exception as e:
-        print(f"[!!] Periodic sync-back to {host} failed (will retry next time): {e}")
-
-
-# ---------------------------------------------------------------------------
-# Query subsets
-# ---------------------------------------------------------------------------
-
-
 def subset_key(
     n: int | None, seed: int, query_shard: int | None, query_shards: int | None
 ) -> str:
-    """Keys a result and its checkpoints by which queries they cover, because
-    evaluate() checkpoints by query POSITION, not content: a 20-query smoke
-    test must never land in the same file as a full run."""
     parts = []
     if n is not None:
         parts.append(f"n{n}_seed{seed}")
@@ -272,11 +187,6 @@ def subset_key(
 
 
 def select_shard(queries, domains, query_row_idxs, query_shard, query_shards):
-    """Strided (i % shards == shard) query split, so every shard sees a mix of
-    domains and difficulties rather than one contiguous block. Each shard
-    writes its own result file and checkpoint dir, so shards are safe to run
-    concurrently on separate machines; `run_experiments.py --merge-shards`
-    (sabermath.shards) stitches them back into one result file."""
     idxs = [i for i in range(len(queries)) if i % query_shards == query_shard]
     if not idxs:
         raise ValueError(f"Shard {query_shard}/{query_shards} selected no queries.")
@@ -289,10 +199,6 @@ def select_shard(queries, domains, query_row_idxs, query_shard, query_shards):
 def instructed_query_texts(
     queries, tasks: list[str], query_instruction: str | None, template: str
 ) -> list[str]:
-    """The query texts evaluate_task() will actually score for one prompt key,
-    deduplicated across the run's tasks. Mirrors evaluate_task: transform() per
-    task's query version, then the same format_instructed_query wrap when an
-    instruction is in play."""
     texts, seen = [], set()
     for task in tasks:
         version = "full" if task == "full-full" else "statement"
@@ -306,10 +212,6 @@ def instructed_query_texts(
 
 
 def assert_envelope_supported(model_key: str, processor, scores_kwargs: dict) -> None:
-    """The vendor input envelope is applied by EmbeddingProcessor.get_scores.
-    Every processor that gets one is a bi-encoder, but a future registry edit
-    could point one at a cross-encoder whose get_scores(**kwargs) would
-    silently swallow it - fail loudly instead."""
     envelope = [k for k in scores_kwargs if k in AFFIX_KEYS]
     if envelope and not isinstance(processor, EmbeddingProcessor):
         raise TypeError(
@@ -317,11 +219,6 @@ def assert_envelope_supported(model_key: str, processor, scores_kwargs: dict) ->
             f"by EmbeddingProcessor.get_scores, but this model's processor is "
             f"{type(processor).__name__}."
         )
-
-
-# ---------------------------------------------------------------------------
-# The run
-# ---------------------------------------------------------------------------
 
 
 def result_filename(
@@ -350,14 +247,6 @@ def run_model(
     query_shard: int | None = None,
     query_shards: int | None = None,
 ) -> None:
-    """Evaluate one model across one or more prompt arms.
-
-    Runs in the calling process; the CLI wraps this in a fresh subprocess per
-    model so an OOM or a CUDA crash cannot corrupt results already written.
-    Processors are built once per `registry.processor_slot` and reused across
-    prompt arms, so a multi-arm run loads an 8B model once rather than
-    four times.
-    """
     tasks = list(tasks or R.ALL_TASKS)
     instruction_keys = list(dict.fromkeys(instruction_keys or ["p0"]))
     save_dir = str(save_dir)
@@ -461,10 +350,9 @@ def run_model(
             _checkpoint_dir=checkpoint_dir,
             _counter=progress_counter,
         ) -> None:
-            # Snapshot progress from the checkpoints into the real result file
-            # every `progress_every` freshly-scored queries, and push it to the
-            # canonical host. A hard kill then loses at most that many queries'
-            # work rather than the whole run.
+            # Snapshot the checkpoints into the real result file every
+            # `progress_every` freshly-scored queries, so a hard kill loses at
+            # most that many queries rather than the whole run.
             if progress_every <= 0:
                 return
             _counter["n"] += 1
@@ -476,7 +364,6 @@ def run_model(
             partial["query_row_idxs"] = query_row_idxs
             partial["part"] = part_name
             write_result(_filepath, model_key, partial)
-            sync_back_if_needed(save_dir)
 
         print(f"\n[~] {model_key} / {instruction_key} ...")
 
@@ -490,11 +377,9 @@ def run_model(
 
             assert_envelope_supported(model_key, model, scores_kwargs)
 
-            # Batch any per-query preprocessing for THIS prompt key before
-            # scoring: generating one query's rewrites per call leaves ~5
-            # sequences in flight and runs ~10x slower than one batched call.
-            # The texts handed over are byte-identical to what evaluate() will
-            # score for this key.
+            # Batch per-query preprocessing before scoring: generating one
+            # query's rewrites per call leaves ~5 sequences in flight and runs
+            # ~10x slower than one batched call.
             if hasattr(model, "prefetch_rewrites"):
                 model.prefetch_rewrites(
                     instructed_query_texts(
@@ -544,9 +429,8 @@ def run_model(
                     model_key: {"model": model_key, "error": str(e), "traceback": tb}
                 },
             }
-            # The full traceback, not just str(e): a bare message ("type
-            # 'array.array' is not subscriptable") is not enough to find the
-            # failure site without reproducing it by hand.
+            # The full traceback, not just str(e): a bare message is rarely
+            # enough to locate the failure without reproducing it.
             print(f"\n[!!] {model_key} / {instruction_key} failed:")
             print(tb)
 
@@ -554,7 +438,6 @@ def run_model(
             filepath, model_key, output, extra_report_fields={"prompt": prompt_block}
         )
         print(f"[+] Wrote {filepath}")
-        sync_back_if_needed(save_dir)
 
     if task_scores_by_prompt and len(task_scores_by_prompt) > 1:
         p0_scores = task_scores_by_prompt.get("p0")

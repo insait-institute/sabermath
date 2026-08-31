@@ -1,19 +1,3 @@
-"""Qwen/Qwen3-Reranker-* served through vLLM - the PRODUCTION path.
-
-Uses the model card's official vLLM recipe: the causal checkpoint is reused
-as a binary ("no"/"yes") sequence classifier via hf_overrides
-(Qwen3ForSequenceClassification + classifier_from_token +
-is_original_qwen3_reranker), and each (query, document) pair is scored with
-llm.score() on the <Instruct>/<Query>/<Document> template below.
-
-Validated against an HF-transformers implementation of the same template on
-2026-08-20 - FEASIBLE for all three sizes (Spearman >= 0.999, mean
-|dNDCG@10| <= 0.026 on the frozen comparison sample). That reference was
-removed on 2026-08-31; the verdicts are archived in
-results/diagnostics/vllm_feasibility/summary.json, and the template strings
-it shared now live here, which is the only remaining copy.
-"""
-
 from typing import ClassVar
 
 from .base import ModelProcessor

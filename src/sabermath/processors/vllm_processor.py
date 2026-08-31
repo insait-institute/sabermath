@@ -1,28 +1,3 @@
-"""vLLM-backed dense embedding processor.
-
-Beyond the plain llm.embed() wrapper this originally was, VLLMProcessor now
-carries the pieces needed to serve models whose Hugging Face repos aren't
-directly loadable/configurable by vLLM - all validated model-by-model against
-the previous production paths (verdicts archived in
-results/diagnostics/vllm_feasibility/summary.json)
-(results/vllm_feasibility/summary.json, 2026-08-19):
-
-- pooler_config as a PLAIN DICT (version-tolerant field mapping, see
-  make_pooler_config) so callers like run_experiments.py's GENERIC_MODELS can
-  express pooling overrides as JSON-able init_kwargs;
-- export_clean: a one-off HF AutoModel re-export for checkpoints vLLM's
-  loader can't consume directly (bert-base-uncased's MLM checkpoint prefixes
-  every tensor with 'bert.', which vLLM's BertModel loader doesn't strip);
-- client-side chunk_to_context (chunk+mean, mirroring
-  SentenceTransformersProcessor.encode's semantics exactly) and silent
-  truncation-to-context, because vLLM hard-REJECTS overlong prompts where
-  sentence-transformers silently truncates;
-- client-side batch_size slicing of embed calls - vLLM has no such knob
-  (it schedules/micro-batches internally); the timing harness
-  (scripts/run_timing.py) uses this to standardize request-level
-  parallelism at 16 documents in flight across every model.
-"""
-
 import os
 from pathlib import Path
 
@@ -38,11 +13,6 @@ def _get_model_name(llm) -> str | None:
 
 
 def artifact_cache_dir() -> Path:
-    """Where one-off derived checkpoints (clean re-exports, merged LoRA
-    adapters) are cached. Deliberately NOT under results/ - that directory is
-    the repo's tracked evidence, and a ~16GB merged model has no business in
-    it. /scratch is per-node, so a first run on a fresh node pays the
-    derivation once; that's accepted."""
     env = os.environ.get("SABERMATH_VLLM_EXPORT_DIR")
     if env:
         return Path(env)
@@ -53,13 +23,6 @@ def artifact_cache_dir() -> Path:
 
 
 def make_pooler_config(fields: dict):
-    """Build a vllm PoolerConfig from a plain dict, tolerating field renames
-    across vLLM versions. Callers use the canonical names pooling_type /
-    normalize / activation; vllm==0.26.0 (the pinned version) has neither
-    `normalize` nor `activation` - its single `use_activation` field does
-    both jobs (for the embed pooler the "activation" IS the final L2
-    normalize; for classify it's the sigmoid/softmax). Unknown fields are
-    dropped with a warning so a rename never turns into a hard failure."""
     import inspect
 
     from vllm.config import PoolerConfig
@@ -91,11 +54,6 @@ def make_pooler_config(fields: dict):
 
 
 def export_clean_checkpoint(model_name: str, cache_dir: str | Path | None = None) -> str:
-    """One-off re-export of a checkpoint through HF AutoModel: strips
-    task-head weight prefixes (e.g. bert-base-uncased's MLM checkpoint names
-    everything 'bert.*'), drops the task head, and writes a config whose
-    architectures matches the bare encoder class vLLM can load. Cached -
-    subsequent calls on the same machine reuse the export."""
     base = Path(cache_dir) if cache_dir is not None else artifact_cache_dir()
     out = base / (model_name.replace("/", "__") + "-clean")
     if (out / "config.json").exists():
@@ -112,10 +70,6 @@ def export_clean_checkpoint(model_name: str, cache_dir: str | Path | None = None
 
 
 def _chunk_texts(texts, tokenizer, max_len):
-    """Client-side replica of SentenceTransformersProcessor.encode's
-    chunk_to_context: split each text into max_len-sized token chunks (minus
-    special tokens); the caller mean-averages per owner afterwards. Keep in
-    sync with st_processor.py."""
     num_special = tokenizer.num_special_tokens_to_add(pair=False)
     chunk_token_len = max_len - num_special
     if chunk_token_len <= 0:
@@ -127,7 +81,7 @@ def _chunk_texts(texts, tokenizer, max_len):
         # special tokens present are ones the CALLER put in the text, and a
         # caller that asks for them means them. Dropping them silently deleted
         # the RaDeR bi-encoders' "<|im_end|>" suffix from every text (verified
-        # 2026-08-25: even a short single-chunk document came back without it),
+        # even a short single-chunk document came back without it),
         # which for a LAST-token pooler is exactly the position being pooled.
         return tokenizer.decode(
             ids, skip_special_tokens=False, clean_up_tokenization_spaces=False
@@ -160,9 +114,6 @@ def _chunk_texts(texts, tokenizer, max_len):
 
 
 def _truncate_text(text, tokenizer, max_len):
-    """Silent truncation-to-context, mirroring what sentence-transformers
-    does implicitly (vLLM instead raises on overlong prompts). Includes the
-    same roundtrip-stability loop as _chunk_texts."""
     num_special = tokenizer.num_special_tokens_to_add(pair=False)
     budget = max_len - num_special
     ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
@@ -266,10 +217,6 @@ class VLLMProcessor(EmbeddingProcessor):
         return self._model_name
 
     def _get_tokenizer(self):
-        """HF tokenizer for client-side chunking/truncation. None when this
-        processor was built from a raw vllm.LLM with no resolvable name -
-        encode() then falls back to passing texts through untouched (the
-        pre-extension behavior)."""
         if self._tokenizer is None and self._tokenizer_name:
             from transformers import AutoTokenizer
 
@@ -289,18 +236,6 @@ class VLLMProcessor(EmbeddingProcessor):
         truncate_to: int | None = None,
         **kwargs,
     ) -> np.ndarray:
-        """Embed texts. Output is STRICTLY positional (texts[i] -> row i, no
-        deduplication) - EmbeddingProcessor's per-text cache and the timing
-        harness's check_cache=False path both rely on that.
-
-        batch_size: client-side slicing of llm.embed calls (vLLM has no such
-        knob itself); None = one call over everything, the production default.
-        chunk_to_context/context_length: chunk+mean, same semantics as
-        SentenceTransformersProcessor.encode.
-        truncate_to: explicit truncation limit; when neither chunking nor an
-        explicit limit is given, texts are silently truncated to the
-        tokenizer's model_max_length (if it's a real limit) - mirroring ST,
-        since vLLM rejects overlong prompts outright."""
         if not texts:
             return np.empty((0, 0), dtype=float)
 

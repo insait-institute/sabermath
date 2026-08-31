@@ -1,29 +1,3 @@
-"""reasonir/ReasonIR-8B: a dense retrieval embedding model with a custom
-GritLM-style bidirectional encoder (requires trust_remote_code=True).
-
-Follows the official Hugging Face quickstart:
-
-    model = AutoModel.from_pretrained("reasonir/ReasonIR-8B",
-                                       torch_dtype="auto", trust_remote_code=True)
-    query_emb = model.encode(query, instruction=query_instruction)
-    doc_emb = model.encode(document, instruction=doc_instruction)
-    sim = query_emb @ doc_emb.T
-
-No instruction prefix is added by default (empty string, matching the
-quickstart and the SABER-Math framework's "no wrapping" convention); pass
-`instruction=...` as a scores_kwarg to `sabermath.evaluate()` if a task
-instruction is desired.
-
-Subclasses EmbeddingProcessor (rather than reimplementing cosine similarity
-directly) so query/document vectors are cached across queries for free - a
-meaningful speedup here since SABER-Math's ~150-document candidate sets
-overlap heavily across the benchmark's queries.
-
-Ported from
-rag-math-test/rank-embedding-math/running-rerankers/sabermath_reasonir.py
-(verified against a completed 1000-query run: Mean nDCG@10 = 0.5070).
-"""
-
 from typing import ClassVar
 
 import numpy as np

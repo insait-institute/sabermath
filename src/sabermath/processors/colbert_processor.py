@@ -1,17 +1,3 @@
-"""PyLate ColBERT late-interaction rerankers, e.g. lightonai/GTE-ModernColBERT-v1
-and lightonai/Reason-ModernColBERT.
-
-SABER-Math is a reranking task over a preselected ~150-document candidate set
-per query, so this uses the official "Reranking" usage from the Hugging Face
-model card (`pylate.rank.rerank` on encoded queries/documents, MaxSim
-scoring), without building a Voyager index. Requires `pip install -U pylate`.
-
-Ported from
-rag-math-test/rank-embedding-math/running-rerankers/sabermath_gte_colbert.py
-and sabermath_reason_colbert.py (which differed only in MODEL_NAME - this
-Processor is parameterized by model_name so it covers both).
-"""
-
 from typing import ClassVar
 
 from .base import ModelProcessor
@@ -31,15 +17,10 @@ class ColBERTProcessor(ModelProcessor):
         self._model_name = model_name
         self._encode_batch_size = encode_batch_size
         self._query_length = query_length
-        # torch_dtype bfloat16 by default (2026-08-21, precision-fairness
-        # rollout: no model computes in fp32 anymore). NOTE this one is a
-        # deliberate deviation from the checkpoints (both ModernColBERT
-        # configs declare fp32): validated on the frozen feasibility sample
-        # at Spearman 0.9993 (reason-moderncolbert) and 0.9907
-        # (gte-moderncolbert, NEAR-MATCH band - same acceptance category as
-        # reasonir/jina-v5-small), with ~10-35x faster scoring. Pass
-        # model_kwargs={"torch_dtype": "float32"} to reproduce the published
-        # fp32 numbers exactly.
+        # bfloat16 by default, a deliberate deviation from both ModernColBERT
+        # configs, which declare fp32 - it scores 10-35x faster at Spearman
+        # 0.99+ against the fp32 reference. Pass
+        # model_kwargs={"torch_dtype": "float32"} to reproduce fp32 exactly.
         self._model_kwargs = (
             dict(model_kwargs)
             if model_kwargs is not None

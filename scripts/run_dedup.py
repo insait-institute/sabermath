@@ -1,31 +1,4 @@
 #!/usr/bin/env python3
-"""Deduplication: where does an LLM-rephrased copy of a query's own problem
-rank when inserted into the corpus? THE endpoint for the dedup experiment.
-
-    # every eligible model
-    python scripts/run_dedup.py
-
-    # a subset
-    python scripts/run_dedup.py --models bge-m3 qwen3-embedding-8b
-
-    # smoke test
-    python scripts/run_dedup.py --models bge-m3 --n 20
-
-TWO REGIMES, computed from the same embeddings in one pass, answering
-different questions - never merge them into one table:
-
-  per-query-candidates  the PUBLISHED protocol. The copy competes against
-                        that query's own 150 candidates, ranked among 151.
-                        Every model can run this.
-  all-documents         the copy competes against all 71,117 documents. Much
-                        harder, no published reference. Bi-encoders and
-                        lexical models only - a pair scorer would need 71,117
-                        forward passes per query.
-
-Results land in results/dedup/. Read them with scripts/report_experiments.py.
-A sharded sweep is stitched back together with --merge-shards.
-"""
-
 import argparse
 import json
 import random
@@ -35,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sabermath import registry as rr
 
@@ -48,13 +21,29 @@ from sabermath.processors.embedding_processor import (
 )
 from sabermath.shards import add_merge_arguments, merge_dedup_shards, run_merge
 
+USAGE = """\
+  # every eligible model
+  python scripts/run_dedup.py
+
+  # a subset
+  python scripts/run_dedup.py --models bge-m3 qwen3-embedding-8b
+
+  # smoke test
+  python scripts/run_dedup.py --models bge-m3 --n 20
+
+  # stitch a sharded sweep back together
+  python scripts/run_dedup.py --merge-shards
+
+Results land in results/dedup/; read them with scripts/report_experiments.py.
+See docs/experiment-dedup.md for the two regimes and the two insertion
+readings, which must never be merged into one table.
+"""
+
 DEFAULT_REPHRASED_DATASET = "RAG4Math/targets-with-rephrased"
 TOP_K_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128]
 
 # Models that score a (query, document) pair rather than producing an
-# independent document vector. They can only run the per-query regime - see
-# run_pairwise. approach0 is deliberately absent: its _BROKEN_QUERIES md5
-# skip-list is keyed to raw benchmark query text.
+# independent document vector, so they can only run the per-query regime.
 PAIRWISE_MODELS = frozenset(
     {
         "qwen3-reranker-0.6b",
@@ -67,11 +56,6 @@ PAIRWISE_MODELS = frozenset(
         "diver-grouprank-32b",
         "gte-moderncolbert",
         "reason-moderncolbert",
-        # Retro* and its rewritten-query variants: generative pointwise
-        # rerankers. They emit a score per (query, document) pair from a
-        # <score> tag and have no encode() at all, so the vector path cannot
-        # serve them - the per-query regime through get_scores() is the only
-        # one that exists for this family.
         "retro-star-8b",
         "retro-star-32b",
         "retro-star-8b-rewritten",
@@ -80,14 +64,6 @@ PAIRWISE_MODELS = frozenset(
         "splade-code-8b",
     }
 )
-# NOT in the set above, deliberately: reason-rewriter-reason-embed-8b was
-# routed through run_pairwise for a while because its QUERY vector is not
-# encode(query) - it is the mean of five rewrites' embeddings - and the vector
-# path would otherwise have measured the bare retriever under the composed
-# model's name. That cost it the all-documents regime, which needs a
-# standalone query vector. It now implements encode_queries(), which the
-# vector path prefers when present, so BOTH regimes are correct for it and
-# nothing has to be special-cased here.
 
 
 DEDUP_EXCLUDED = {
@@ -121,15 +97,6 @@ def align_rephrased(queries, rephrased):
 
 
 def self_document_positions(queries, documents, doc_ids) -> dict[int, int]:
-    """Position in the scored corpus of each query's OWN original document.
-
-    92.8% of SABER-Math query problems also appear verbatim in the document
-    corpus. Left in, that identical original outranks the rephrased copy for
-    almost every query - which is why a first run of this experiment put only
-    1.9% of rephrased copies at rank 1 but 24% at rank <= 2. That measures
-    "can the model find an exact duplicate", not "can it find a rephrase",
-    so the self-match is excluded by default (--keep-self-match restores it).
-    """
     position_of_doc = {doc_id: pos for pos, doc_id in enumerate(doc_ids)}
     doc_index_by_problem = {}
     for i, problem in enumerate(documents["problem"]):
@@ -146,8 +113,8 @@ def self_document_positions(queries, documents, doc_ids) -> dict[int, int]:
 def build_texts(queries, documents, rephrased, doc_version, query_version, corpus):
     rephrased_problems, solutions = align_rephrased(queries, rephrased)
 
-    # Every document that appears in any candidate list - which for this
-    # benchmark is the whole document set. Both regimes score exactly these.
+    # Every document in any candidate list, which here is the whole document
+    # set. Both regimes score exactly these.
     doc_ids = sorted({int(i) for row in queries["candidates"] for i in row})
 
     corpus_texts = transform(documents, doc_version, doc_ids)
@@ -173,12 +140,6 @@ def build_texts(queries, documents, rephrased, doc_version, query_version, corpu
 
 def ranks_both_regimes(corpus_scores, rephrased_scores, own_idx, self_pos,
                        restrict_row):
-    """Both regimes from ONE set of scores.
-
-    They differ only in what the rephrased copy is ranked against, never in
-    the vectors themselves - so encoding 71,117 documents twice, or paying an
-    embedding API twice for byte-identical vectors, would be pure waste.
-    """
     out = {
         "all-documents": ranks_from_scores(
             corpus_scores, rephrased_scores, own_idx, self_pos, None
@@ -193,13 +154,6 @@ def ranks_both_regimes(corpus_scores, rephrased_scores, own_idx, self_pos,
 
 def ranks_from_scores(corpus_scores, rephrased_scores, own_idx, self_pos=None,
                       restrict=None):
-    """Rank of the query's rephrased copy. Matches the published definition
-    verbatim: "1 + number of original candidate vectors with strictly greater
-    cosine similarity; exact ties receive the best tied rank".
-
-    restrict, when given, is the set of corpus positions the copy competes
-    against - the query's own candidate list under the published protocol.
-    """
     own = rephrased_scores[own_idx]
     if restrict is not None:
         competitors = corpus_scores[restrict]
@@ -218,12 +172,6 @@ def ranks_from_scores(corpus_scores, rephrased_scores, own_idx, self_pos=None,
 
 
 def summarize(ranks: list[int]) -> dict:
-    """avg_rank is reported for continuity with the published rows, but it is
-    NOT the statistic to read: the rank distribution has a long tail driven by
-    degenerate query texts (one query is the 19-character string "Solve the
-    equation:" with no equation in it), so a handful of queries move the mean
-    by an order of magnitude. median_rank and the top_k coverage are the
-    robust summaries."""
     arr = np.asarray(ranks, dtype=float)
     out = {
         "avg_rank": float(arr.mean()),
@@ -242,16 +190,10 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
     processor = rr.build_processor(
         model_key, "p0", args.tensor_parallel_size, args.save_to
     )
-    # Duck-typed, not isinstance(EmbeddingProcessor): what this path actually
-    # requires is "one embedding per text", i.e. an encode(). A COMPOSED
-    # processor satisfies that without inheriting from EmbeddingProcessor -
-    # reason-rewriter-reason-embed-8b wraps a vLLM bi-encoder and exposes both
-    # encode() (documents) and encode_queries() (queries, with the rewrite),
-    # and INFXRetrieverProcessor is the same shape. An isinstance check
-    # rejected those for the wrong reason: they are bi-encoders in every sense
-    # this script cares about, they just are not subclasses. A genuine
-    # cross-encoder still has no encode() and is still rejected here, and the
-    # pairwise families never reach this function at all (PAIRWISE_MODELS).
+    # Duck-typed rather than isinstance(EmbeddingProcessor): this path needs
+    # "one embedding per text", which a composed processor satisfies without
+    # subclassing. A genuine cross-encoder has no encode() and is still
+    # rejected.
     if not (
         isinstance(processor, EmbeddingProcessor)
         or callable(getattr(processor, "encode", None))
@@ -264,10 +206,9 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
         )
 
     scores_kwargs, _ = rr.prompt_scores_kwargs(model_key, None)
-    # This script encodes whole corpora up front rather than going through
-    # get_scores per query, so the per-side envelope has to be applied here:
-    # the affix keys are get_scores parameters and would raise as unknown
-    # kwargs inside llm.embed / SentenceTransformer.encode.
+    # Corpora are encoded up front rather than through get_scores, so the
+    # per-side envelope has to be applied here - the affix keys are get_scores
+    # parameters and would raise inside encode().
     affixes, encode_kwargs = split_affix_kwargs(scores_kwargs)
     encode_kwargs.pop("batch_size", None)
 
@@ -302,12 +243,9 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
         ),
         dtype=np.float32,
     )
-    # A processor whose query vector is NOT encode(query) - e.g. the
-    # reason-rewriter composition, whose query vector is the mean of its
-    # rewrites' embeddings - exposes encode_queries(). Calling plain encode()
-    # on such a model returns bare-retriever vectors and would report them
-    # under the composed model's name, so prefer the query-aware method
-    # whenever it exists. Models without it are unaffected.
+    # A processor whose query vector is not encode(query) - a composed
+    # rewriter, say - exposes encode_queries(). Calling plain encode() there
+    # would report bare-retriever vectors under the composed model's name.
     encode_queries = getattr(processor, "encode_queries", None)
     if encode_queries is not None:
         print(
@@ -357,16 +295,6 @@ def run_pairwise(
     model_key, args, corpus_texts, rephrased_texts, query_texts, query_idxs,
     self_pos, restrict,
 ):
-    """Cross-encoders, late-interaction and sparse models score a (query,
-    document) PAIR - there is no document vector to precompute and reuse, so
-    the rephrased copy can only be ranked by scoring it alongside the query's
-    own candidates. That is exactly the published per-query protocol, and it
-    is the ONLY regime these models can run in: ranking against the whole
-    corpus would mean 71,117 forward passes per query.
-
-    Checkpointed after every query, because the generative rerankers take
-    hours and this cluster reaps idle-GPU jobs.
-    """
     if restrict is None:
         raise SystemExit(
             f"{model_key} scores query-document pairs, so it can only run "
@@ -426,17 +354,6 @@ def run_pairwise(
 
 
 def run_lexical(model_key, args, corpus_texts, rephrased_texts, query_texts, query_idxs, self_pos, restrict):
-    """Lexical dedup.
-
-    The three lexical families each come in two tokenizer variants, exactly
-    as in sabermath.registry.LEXICAL_MODEL_BUILDERS: the default keys tokenize
-    with Approach Zero's operator-tree tokenizer over the LaTeX blocks plus
-    lowercased prose words, and the "-no-tok" keys use the plain-text
-    fallback (lowercase + whitespace split for BM25/Jaccard, sklearn's own
-    regex tokenizer for TF-IDF). The variant has to be threaded through here
-    rather than read off a processor because this script indexes the whole
-    corpus once instead of rebuilding an index per query.
-    """
     from sabermath.processors.tokenization_helper import math_word_tokens
 
     approach0 = not model_key.endswith("-no-tok")
@@ -474,8 +391,7 @@ def run_lexical(model_key, args, corpus_texts, rephrased_texts, query_texts, que
                 tokenizer=math_word_tokens, token_pattern=None, lowercase=False
             )
         else:
-            # No custom tokenizer at all, so sklearn's defaults apply: its
-            # r"(?u)\b\w\w+\b" regex plus lowercasing. Matches
+            # sklearn's default regex tokenizer plus lowercasing, matching
             # TfidfProcessor(tokenize_approach0=False).
             vectorizer = TfidfVectorizer()
         doc_matrix = vectorizer.fit_transform(corpus_texts + rephrased_texts)
@@ -528,7 +444,6 @@ def run_one_model(
     self_pos,
     restrict,
 ) -> None:
-    """One model's full dedup measurement, written out per regime."""
     if model_key in PAIRWISE_MODELS:
         per_query = run_pairwise(
             model_key, args, corpus_texts, rephrased_texts, query_texts,
@@ -562,14 +477,10 @@ def run_one_model(
             print(f"[~] {regime}: not available for {model_key} - skipped.")
             continue
 
-        # len(self_pos) counts queries whose own document exists ANYWHERE in
-        # the 71,117-document corpus, which is the right number only for the
-        # all-documents regime. In the per-query regime a query competes only
-        # against its own 150 candidates, and a query's own document is never
-        # one of them (measured: 0 of 928), so the flag changes nothing there.
-        # Reporting the global count per regime read as if 928 competitors had
-        # been removed from a 151-vector pool, so report what was actually
-        # excluded under this regime.
+        # self_pos counts queries whose own document is anywhere in the
+        # corpus, which is only the right number for the all-documents regime.
+        # In the per-query regime a query's own document is never among its own
+        # candidates, so report what this regime actually excluded.
         if regime == "all-documents" or restrict is None:
             n_excluded = len(self_pos)
         else:
@@ -636,7 +547,9 @@ def run_one_model(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        epilog=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--models",
         nargs="+",
@@ -744,10 +657,9 @@ def main() -> None:
         )
     )
 
-    # Every model can do dedup EXCEPT approach0: its _BROKEN_QUERIES md5
-    # skip-list is keyed to raw benchmark query text, and a rephrased
-    # insertion is not in it, so it would segfault on the very rows this
-    # experiment is about.
+    # approach0 is the one exclusion: its _BROKEN_QUERIES skip-list is keyed
+    # to raw benchmark query text, so a rephrased insertion is not in it and
+    # would segfault on exactly the rows this experiment is about.
     eligible = [k for k in rr.ALL_MODEL_KEYS if k not in DEDUP_EXCLUDED]
     models = args.models or eligible
     excluded = [m for m in models if m in DEDUP_EXCLUDED]

@@ -1,20 +1,3 @@
-"""Stitching a sharded sweep back into one result file.
-
-Both run endpoints can split the query set into strided shards
-(`--query-shards N --query-shard i`), so a slow model runs as N concurrent
-jobs, each with its own checkpoint and its own
-`<base>__shard<i>of<n>.json`. This module puts the pieces back together, and
-each endpoint exposes it as `--merge-shards`.
-
-The one rule both mergers follow: every summary statistic is RECOMPUTED from
-the union of the parts, never averaged across them. A shard's mean is over
-its own ~1/N of the queries, and averaging N such means equals the true mean
-only when the shards are exactly equal-sized and every query is scored -
-neither is guaranteed, since the stride leaves shards differing by one and an
-unfinished shard has holes. The dedup statistics (percentiles, top-k
-coverages) are not even linear, so averaging them would be wrong regardless.
-"""
-
 from __future__ import annotations
 
 import json
@@ -40,13 +23,10 @@ TOP_K_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128]
 
 
 def base_name(path: Path) -> str:
-    """The part's name with the __shard<i>of<n> component removed, wherever in
-    the name it sits."""
     return SHARD_RE.sub("", path.name)
 
 
 def group_shards(directory: Path) -> dict[Path, list[Path]]:
-    """{destination: parts} for every shard group in `directory`."""
     groups: dict[Path, list[Path]] = {}
     for path in sorted(directory.glob("*__shard*of*.json")):
         groups.setdefault(directory / base_name(path), []).append(path)
@@ -54,12 +34,6 @@ def group_shards(directory: Path) -> dict[Path, list[Path]]:
 
 
 def default_out(paths: list[Path]) -> Path:
-    """Where a merge of `paths` lands when no destination is given.
-
-    Deliberately conservative: it never strips the prompt key, so merging p0
-    shards yields <model>__p0.json and cannot silently overwrite a production
-    <model>.json - pass an explicit destination for that.
-    """
     names = {base_name(p) for p in paths}
     if len(names) != 1:
         raise SystemExit(
@@ -113,8 +87,6 @@ def load_evaluation_parts(paths: list[Path]) -> tuple[str, list[dict]]:
 
 
 def merge_evaluation(model_key: str, parts: list[dict]) -> tuple[dict, dict]:
-    """Reassemble per-query nDCG at each query's GLOBAL index, then recompute
-    the overall and per-domain means from the reassembled array."""
     # Global index -> domains, assembled from the parts themselves so this
     # never needs the dataset.
     domains_by_idx: dict[int, list[str]] = {}
@@ -226,7 +198,6 @@ def merge_evaluation_shards(
     dry_run: bool = False,
     allow_incomplete: bool = False,
 ) -> bool:
-    """Merge one shard group. Returns True if a file was written."""
     paths = sorted(paths)
     if len(paths) < 2:
         print(f"[~] Merging a single part ({paths[0].name}) - nothing to stitch.")
@@ -268,8 +239,6 @@ def merge_evaluation_shards(
 
 
 def summarize_ranks(ranks) -> dict:
-    """The same statistics run_dedup.summarize computes, kept in sync
-    deliberately - the merger must not depend on a scoring backend."""
     arr = np.asarray(ranks, dtype=float)
     out = {
         "avg_rank": float(arr.mean()),
@@ -285,8 +254,6 @@ def summarize_ranks(ranks) -> dict:
 
 
 def merge_dedup(parts: list[tuple[Path, dict]]) -> tuple[dict, list[int]]:
-    """Union the per-query records and recompute every statistic. Returns the
-    merged payload and the query indices missing from every shard."""
     keys = {(d["model"], d["regime"]) for _, d in parts}
     if len(keys) != 1:
         raise SystemExit(f"Parts differ in model/regime: {sorted(keys)}")
@@ -333,7 +300,6 @@ def merge_dedup_shards(
     dry_run: bool = False,
     allow_incomplete: bool = False,
 ) -> bool:
-    """Merge one dedup shard group. Returns True if a file was written."""
     paths = sorted(paths)
     parts = [(p, _read(p)) for p in paths]
     merged, gaps = merge_dedup(parts)
@@ -371,7 +337,6 @@ def merge_dedup_shards(
 
 
 def add_merge_arguments(parser, default_dir: str) -> None:
-    """Give an endpoint its --merge-shards mode."""
     group = parser.add_argument_group("merging a sharded sweep")
     group.add_argument(
         "--merge-shards",
@@ -405,8 +370,6 @@ def add_merge_arguments(parser, default_dir: str) -> None:
 
 
 def run_merge(args, merge_one, directory: Path) -> None:
-    """Dispatch --merge-shards: an explicit part list, or a scan of
-    `directory` for every shard group in it."""
     if args.merge_shards:
         merge_one(
             [Path(p) for p in args.merge_shards],

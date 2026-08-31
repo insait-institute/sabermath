@@ -7,7 +7,7 @@ Produce the runs, then the tables:
 
 ```bash
 python scripts/run_experiments.py --models <key> --prompts p0 p1 p2 p3
-python -m sabermath.reporting.instruction_statement_full
+python scripts/report_experiments.py
 ```
 
 Reporting needs no GPU, no downloads and no cluster: everything the tables show
@@ -71,7 +71,7 @@ reported setting.
 
 The reported table is **statement-full**, the paper's headline task. The run
 files carry all three tasks, so statement-statement and full-full tables can be
-added to `sabermath.reporting` without re-running anything.
+added to `scripts/tables/` without re-running anything.
 
 ## What the runs are
 

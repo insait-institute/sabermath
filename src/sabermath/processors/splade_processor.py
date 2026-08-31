@@ -1,20 +1,3 @@
-"""naver/splade-code-8B: SPLADE sparse retrieval (Qwen3-based), run via
-Sentence Transformers' SparseEncoder exactly as in the official Hugging Face
-model card:
-
-    from sentence_transformers import SparseEncoder
-    model = SparseEncoder("naver/splade-code-8B", trust_remote_code=True)
-
-Queries and documents are encoded with encode_query()/encode_document() (the
-SparseEncoder counterparts of the model card's `prompt_type="query"`
-Transformers usage) and scored with the model's native similarity function
-(dot product for sparse embeddings, not cosine) - this is why SpladeProcessor
-implements get_scores() directly instead of subclassing EmbeddingProcessor.
-
-Ported from
-rag-math-test/rank-embedding-math/running-rerankers/sabermath_splade.py.
-"""
-
 from typing import ClassVar
 
 import numpy as np
@@ -38,7 +21,7 @@ class SpladeProcessor(ModelProcessor):
         self._model_name = model_name
         self._query_batch_size = query_batch_size
         self._document_batch_size = document_batch_size
-        # torch_dtype bfloat16 by default (2026-08-21): BOTH splade-code
+        # torch_dtype bfloat16 by default: BOTH splade-code
         # checkpoints DECLARE torch_dtype bfloat16 in their configs, but a
         # bare SparseEncoder(...) load ignores that and computes in fp32 -
         # the only fp32 compute left in the benchmark alongside the (then)

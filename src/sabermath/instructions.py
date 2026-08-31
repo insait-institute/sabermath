@@ -20,10 +20,8 @@ INSTRUCTIONS: dict[str, str | None] = {
 
 INSTRUCTION_KEYS = tuple(INSTRUCTIONS)
 
-# The vendors' own wrapper, single newline. The double-newline variant that
-# earlier runs used was removed on 2026-08-31 along with the rest of the
-# pre-2026-08-25 protocol; it is kept only as a name here so a stored result
-# that records it stays readable.
+# The vendors' own wrapper, single newline. The double-newline variant is kept
+# as a name only, so a stored result that records it stays readable.
 INSTRUCTION_TEMPLATES: dict[str, str] = {
     "canonical": "Instruct: {instruction}\nQuery: {query}",
 }

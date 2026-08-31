@@ -12,15 +12,6 @@ _MATH_BLOCK_RE = re.compile(
 _WORD_RE = re.compile(r"\b[a-zA-Z]+\b")
 
 def math_word_tokens(text: str, lowercase: bool = True) -> list[str]:
-    """
-    Mirror of get_math_words_tokens() from the model_comparisons benchmark,
-    adapted to a single combined string:
-      - $...$ / $$...$$ / \\(...\\) / \\[...\\] blocks -> pya0.tokenize (case preserved)
-      - remaining prose                                -> alphabetic words, lowercased iff `lowercase`
-    Returns math tokens followed by word tokens (the "full" token list).
-    No stop-word filtering: none of tf-idf, bm25, or jaccard removes stop
-    words in their standard formulations, so this doesn't either.
-    """
     # Math: tokenize each LaTeX block with pya0
     # pya0.tokenize() returns plain str tokens for most nodes, but structured
     # nodes (e.g. quantified/wildcard "qvar" variables) come back as tuples

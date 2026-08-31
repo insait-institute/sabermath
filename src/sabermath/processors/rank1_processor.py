@@ -1,50 +1,3 @@
-"""jhu-clsp/rank1-32b: a reasoning reranker served via vLLM.
-
-For each (query, document) pair, the model generates a reasoning chain inside
-a <think>...</think> section, then emits a binary relevance judgment ("true"
-or "false"); the continuous relevance score is P(true) / (P(true) + P(false))
-computed from the final-token logprobs. This follows the officially supplied
-minimal vLLM example from the Hugging Face model card
-(https://huggingface.co/jhu-clsp/rank1-32b): same prompt template,
-SamplingParams (temperature=0, max_tokens=8192, logprobs=20,
-stop=["</think> true", "</think> false"]), and true/false logprob scoring.
-
-NOTE ON dtype: the HF checkpoint is bfloat16, and `dtype="float16"` below
-forces a downcast - vLLM logs "Casting torch.bfloat16 to torch.float16" on
-every run (observed on job 753850). The value is inherited from the model
-card's example.
-
-MEASURED, and it costs nothing: jobs 753874 (bfloat16) vs 753896 (float16),
-main benchmark, same 50-query subset (--n 50 --seed 42), all 3 tasks, p0,
-dtype the only difference (env parity across vllm/torch/transformers/
-tokenizers/cuda verified on both nodes). Per-task deltas -0.0095 / -0.0001 /
-+0.0003 - signs inconsistent, each within ~1 SE, 3-task mean -0.0031. Keep
-float16. Reproduce with scripts/compare_rank1_dtype.py.
-
-BUT the per-query scores are NOT reproducible across dtype: 150/150 queries
-moved, individual swings up to +/-0.22 nDCG. Precision changes the output, it
-just does not change it in a DIRECTION. Same mechanism as the greedy-chain
-divergence measured in diag_rank1_backends.py (median fork at token 212): a
-tiny numeric difference forks the reasoning chain and the scatter cancels in
-aggregate. Do not treat an individual rank1 per-query score as a fixed
-quantity, and do not diff per-query scores across runs to detect regressions -
-only aggregates are stable.
-
-This class is vLLM-NATIVE: it was never migrated from an HF implementation,
-so unlike the RaDeR and Qwen3 rerankers it had no reference to be checked
-against. That HF reference was removed on 2026-08-31; its verdict is archived
-in results/diagnostics/vllm_feasibility/summary.json. It was added
-for exactly that purpose. It is NOT production - see its header.
-
-Ported from rag-math-test/rank-embedding-math/running-rerankers/sabermath_rank1.py
-(verified against a completed 100-query run: Mean nDCG@10 = 0.6068). That
-standalone script's larger runs (400+ and 1000 queries) were repeatedly
-killed by wall-clock limits before finishing - the per-query cost of
-`max_thinking_tokens` x ~150 candidates is high. Tune `max_thinking_tokens`,
-`tensor_parallel_size` and/or evaluate on a query subset (see
-scripts/run_experiments.py --n) accordingly for a full run.
-"""
-
 import math
 from typing import ClassVar
 
@@ -143,8 +96,6 @@ class Rank1Processor(ModelProcessor):
         )
 
     def _truncate_document(self, query: str, document: str) -> str:
-        """Truncate the document (by tokens) so the prompt fits the context
-        window, reserving room for the generated reasoning chain."""
         reserve = self._sampling_params.max_tokens + 64
         overhead = len(
             self._tokenizer(
@@ -158,7 +109,6 @@ class Rank1Processor(ModelProcessor):
         return document
 
     def _relevance_score(self, output) -> float:
-        """Extract P(true) from a vLLM completion, per the official example."""
         final_logits = output.logprobs[-1]
 
         true_lp = final_logits.get(self._true_token)

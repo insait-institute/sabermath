@@ -8,15 +8,6 @@ from .embedding_processor import EmbeddingProcessor
 
 
 class OpenRouterEmbeddingProcessor(EmbeddingProcessor):
-    """text-embedding-3-small/large via OpenRouter instead of OpenAI
-    directly - requested explicitly (OpenRouter key supplied instead of an
-    OpenAI one). sabermath.processors.OpenAIProcessor has no way to point
-    at a custom base_url; this replicates its async batching/retry logic
-    with a different base_url and the OpenRouter model-id convention
-    (provider-prefixed, e.g. "openai/text-embedding-3-small" - confirmed
-    directly: OpenRouter exposes an OpenAI-API-compatible /v1/embeddings
-    endpoint, verified with a real embeddings.create() call before wiring
-    this in)."""
 
     processor = "openrouter"
 
