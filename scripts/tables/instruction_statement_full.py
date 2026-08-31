@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+from collections import defaultdict
 import json
+from pathlib import Path
 import re
 import statistics
-from collections import defaultdict
-from pathlib import Path
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUNS = ROOT / "results" / "evaluation"
@@ -13,8 +14,6 @@ TASK = "statement-full"
 ARMS = ["p0", "p1", "p2", "p3"]
 NAME = re.compile(r"^([a-z0-9._-]+?)(?:__(p[0-3]|pm))?(?:__shard(\d+)of(\d+))?$")
 
-# The 49 rows of the paper's confidence-interval table, minus its three
-# -no-tok lexical variants: (display name, run key, Type code).
 TABLE = [
     ("ReasonReranker-Qwen3-32B-Rewrite", "retro-star-32b-rewritten", "RTWC"),
     ("ReasonEmbed-Qwen3-8B-Rewrite", "reason-rewriter-reason-embed-8b", "RTWB"),
@@ -67,9 +66,6 @@ TABLE = [
     ("RoBERTa", "roberta-base", "B"),
 ]
 
-# Models the harness refuses to run instructed, with its own stated reason
-# (scripts/run_experiments.py, INSTRUCTION_EXCLUDED). None of the four has an
-# instruction mechanism: a prompt could only reach them as extra query terms.
 EXCLUDED = {
     "approach0": "its segfault skip-list matches an MD5 of the raw query text, which any rewrite defeats",
     "bm25": "no instruction mechanism; the arms it did have were dropped so the lexical rows are treated alike",
@@ -96,14 +92,6 @@ def collect(runs_dir: Path):
             scored = [v for v in values if v is not None]
             if not scored:
                 continue
-            # An explicit __pN filename is the ablation's own run for that
-            # arm; a bare "<model>.json" is the main experiment, which for the
-            # qwen3-reranker family fills the model's <Instruct> slot with the
-            # vendor default rather than leaving it empty. Both parse as p0, and
-            # the bare name sorts FIRST, so a plain setdefault silently measures
-            # p1-p3 against a different baseline condition than the arms
-            # themselves. Explicit always wins; the bare file is only a fallback
-            # for a model whose p0 the ablation tree does not contain.
             entry = (scored, report, path.name)
             rank = 0 if m.group(2) else 1
             if shard is None:

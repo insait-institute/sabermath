@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
-import re
 from pathlib import Path
+import re
+
 
 SHARD_RE = re.compile(r"^(?P<stem>.+)__shard(?P<i>\d+)of(?P<n>\d+)$")
-EXPECTED_TARGETS = 969  # RAG4Math/targets_fixed_filtered_latex, train split
-
+EXPECTED_TARGETS = 969
 
 def parse_shard(path: Path):
     m = SHARD_RE.match(path.stem)
@@ -21,7 +16,6 @@ def parse_shard(path: Path):
             "<method>[__<arm>]__shard<i>of<n>.json"
         )
     return m.group("stem"), int(m.group("i")), int(m.group("n"))
-
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
@@ -107,7 +101,6 @@ def main(argv=None) -> None:
     tmp.write_text(json.dumps(merged))
     tmp.replace(out)
     print(f"[+] Wrote {out}")
-
 
 if __name__ == "__main__":
     main()

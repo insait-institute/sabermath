@@ -1,46 +1,38 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-
 import argparse
 import csv
 import json
 import math
 import os
+from pathlib import Path
 import random
 import re
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-import pandas as pd
-import yaml
 from datasets import load_dataset
 from loguru import logger
+import numpy as np
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
+import yaml
 
 from sabermath.llm_api import APIQuery
 from sabermath.llm_executor import QueryExecutor
 from sabermath.llm_postprocess import fix_thinking
 
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 NUM_PLAYERS_DEFAULT = 150
 NUM_ROUNDS_DEFAULT = 50
 CHECKPOINT_EVERY_DEFAULT = 5
 BATCH_SIZE_DEFAULT = 200
 
-
 def extract_boxed_number(s: str) -> int:
     match = re.search(r"\\boxed\{\s*([12])\s*\}", s)
     if not match:
         raise ValueError("No valid \\boxed{1} or \\boxed{2} found")
     return int(match.group(1))
-
 
 def has_valid_relevance_scores_full(
     relevance_scores_full: Optional[List[float]],
@@ -69,7 +61,6 @@ def has_valid_relevance_scores_full(
             return False
 
     return True
-
 
 def next_pairs(
     scores: Dict[str, int],
@@ -123,7 +114,6 @@ def next_pairs(
         )
 
     return pairings
-
 
 def compute_bt_ratings(df: pd.DataFrame, C: float = 1.0, **kwargs) -> pd.Series:
 
@@ -180,7 +170,6 @@ def compute_bt_ratings(df: pd.DataFrame, C: float = 1.0, **kwargs) -> pd.Series:
 
     return ratings
 
-
 def count_inversions_against_ground_truth(
     estimated_scores: List[float],
     ground_truth_scores: List[float],
@@ -201,7 +190,6 @@ def count_inversions_against_ground_truth(
                 inversions += 1
 
     return inversions
-
 
 def load_existing_match_results(
     matches_save_file: str,
@@ -242,7 +230,6 @@ def load_existing_match_results(
 
     return existing
 
-
 def append_matches_to_csv(rows: List[Dict], matches_save_file: str) -> None:
     if not rows:
         return
@@ -270,7 +257,6 @@ def append_matches_to_csv(rows: List[Dict], matches_save_file: str) -> None:
 
         for row in rows:
             writer.writerow(row)
-
 
 def compute_checkpoint_inversions_for_target(
     target_id: str,
@@ -309,7 +295,6 @@ def compute_checkpoint_inversions_for_target(
     )
 
     return inversions
-
 
 def run_swiss_tour_with_prompt_judge(
     targets: List[Dict],
@@ -595,7 +580,6 @@ def run_swiss_tour_with_prompt_judge(
 
     return df, checkpoint_inversions
 
-
 def save_json(output: Dict, output_json: str) -> None:
     output_dir = os.path.dirname(output_json)
 
@@ -604,7 +588,6 @@ def save_json(output: Dict, output_json: str) -> None:
 
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2)
-
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
@@ -954,7 +937,6 @@ def main(argv=None) -> None:
 
     print(f"Saved final results to {args.output_json}")
     print(json.dumps(final_output, indent=2))
-
 
 if __name__ == "__main__":
     main()

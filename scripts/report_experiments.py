@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
+
 
 USAGE = """\
   python scripts/report_experiments.py                 # everything
@@ -10,25 +11,16 @@ USAGE = """\
   python scripts/report_experiments.py --list
   python scripts/report_experiments.py --out-dir /tmp/tables
   python scripts/report_experiments.py mteb --mteb-file leaderboard.csv
-
-Safe to run at any point: a generator whose inputs are missing is skipped with
-a note, and a partially-finished sweep gives a partial table, not a wrong one.
 """
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 RESULTS = Path("results")
 DEFAULT_OUT = RESULTS / "tables"
 
-# The MTEB leaderboard export is not redistributable, so it is not in the
-# repo; report_mteb skips cleanly when it is absent. Overridden by --mteb-file.
 DEFAULT_MTEB_CSV = RESULTS / "mteb" / "leaderboard.csv"
 MTEB_CSV = DEFAULT_MTEB_CSV
 
 
-# Each generator is its own script, run in its own process, so one failing
-# never aborts the rest of the report.
 def _run(label: str, script: str, argv: list[str], optional: bool = False) -> bool:
     print(f"\n{'=' * 70}\n== {label}\n{'=' * 70}")
     completed = subprocess.run([sys.executable, str(ROOT / script), *argv], cwd=ROOT)

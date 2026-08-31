@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import csv
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import seaborn as sns
 from matplotlib.lines import Line2D
+import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator, FuncFormatter
+import seaborn as sns
 
 from sabermath.figures import (
     DEFAULT_MODEL_COLORS,
@@ -18,8 +13,7 @@ from sabermath.figures import (
     DEFAULT_MODEL_MARKER_SYMBOLS,
 )
 
-# parents: [0] analysis, [1] sabermath, [2] src, [3] the repo root.
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "results/latency/data.csv"
 OUT_DIR = REPO / "results/latency/plots"
 OUT_STEM = "figure2_latency"
@@ -54,7 +48,6 @@ FRONTIER_TITLES = {
 X_LIM = (0.01, 150.0)
 Y_LIM = (0.25, 0.80)
 
-
 def load_rows() -> list[dict]:
     with DATA.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -65,7 +58,6 @@ def load_rows() -> list[dict]:
         row["named"] = row["named"] == "1"
 
     return rows
-
 
 def main() -> None:
     rows = load_rows()
@@ -238,8 +230,7 @@ def main() -> None:
         fig.savefig(
             path, dpi=300, bbox_inches="tight", bbox_extra_artists=legends
         )
-        print(f"Wrote {path.relative_to(HERE.parents[1])}")
-
+        print(f"Wrote {path.relative_to(REPO)}")
 
 if __name__ == "__main__":
     main()

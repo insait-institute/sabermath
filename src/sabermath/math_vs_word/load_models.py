@@ -1,23 +1,12 @@
 import os
-import sys
-from pathlib import Path
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-# Kept so this module still imports when the package has not been pip-installed
-# into the active environment - the same convention scripts/run_timing.py uses.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from sabermath.registry import RADER_BIENCODER_MODELS  # noqa: E402
 from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
 from . import SIMILARITIES_DIR
 
-# Nothing here maintains its own builders or per-model get_scores kwargs:
-# every model is built and scored by delegating to the registry through
-# model_key_for(), so "how is this model called" has one answer per model.
-# microsoft/codebert-base is the only exception - it is not in the paper's
-# table and has no registry key, so it keeps the generic ST path.
 _NO_EXPERIMENT_KEY = {"microsoft/codebert-base"}
 
 # tensor_parallel_size. This module pins CUDA_VISIBLE_DEVICES=0 above, so

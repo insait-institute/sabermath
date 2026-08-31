@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
 from pathlib import Path
+
 
 TASK_ORDER = [
     "spoken-in-context-expression",
@@ -26,10 +22,8 @@ TASK_LABELS = {
     "spoken-expression-in-context": r"Spoken $\to$ Expr ctx",
 }
 
-
 def short_model_name(model: str) -> str:
     return str(model).split("/")[-1]
-
 
 def escape_latex(text: str) -> str:
     return (
@@ -44,11 +38,9 @@ def escape_latex(text: str) -> str:
         .replace("}", r"\}")
     )
 
-
 def avg(values):
     values = [v for v in values if v is not None]
     return sum(values) / len(values) if values else None
-
 
 def fmt(value, best=None):
     if value is None:
@@ -60,7 +52,6 @@ def fmt(value, best=None):
         return rf"\textbf{{{text}}}"
 
     return text
-
 
 def load_rows(directory: Path):
     rows = []
@@ -93,7 +84,6 @@ def load_rows(directory: Path):
         raise SystemExit(f"No .json files found in {directory}")
 
     return rows, k_values
-
 
 def make_table(rows, k_values):
     recall_label = f"R@{next(iter(k_values))}" if len(k_values) == 1 else "R@k"
@@ -165,7 +155,6 @@ def make_table(rows, k_values):
 
     return "\n".join(lines)
 
-
 def build_document(table_tex):
     return "\n".join(
         [
@@ -180,7 +169,6 @@ def build_document(table_tex):
             "",
         ]
     )
-
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -213,7 +201,6 @@ def main(argv=None) -> None:
         f.write(output)
 
     print(f"✓ Generated {out_file}")
-
 
 if __name__ == "__main__":
     main()

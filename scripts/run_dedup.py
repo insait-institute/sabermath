@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import random
-import sys
 from pathlib import Path
+import random
 
-import numpy as np
 from datasets import load_dataset
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import numpy as np
 
 from sabermath import registry as rr
-
 from sabermath.benchmark import transform
 from sabermath.data import load_data
 from sabermath.processors import EmbeddingProcessor
@@ -42,8 +38,6 @@ readings, which must never be merged into one table.
 DEFAULT_REPHRASED_DATASET = "RAG4Math/targets-with-rephrased"
 TOP_K_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128]
 
-# Models that score a (query, document) pair rather than producing an
-# independent document vector, so they can only run the per-query regime.
 PAIRWISE_MODELS = frozenset(
     {
         "qwen3-reranker-0.6b",
@@ -112,9 +106,6 @@ def self_document_positions(queries, documents, doc_ids) -> dict[int, int]:
 
 def build_texts(queries, documents, rephrased, doc_version, query_version, corpus):
     rephrased_problems, solutions = align_rephrased(queries, rephrased)
-
-    # Every document in any candidate list, which here is the whole document
-    # set. Both regimes score exactly these.
     doc_ids = sorted({int(i) for row in queries["candidates"] for i in row})
 
     corpus_texts = transform(documents, doc_version, doc_ids)
@@ -190,10 +181,6 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
     processor = rr.build_processor(
         model_key, "p0", args.tensor_parallel_size, args.save_to
     )
-    # Duck-typed rather than isinstance(EmbeddingProcessor): this path needs
-    # "one embedding per text", which a composed processor satisfies without
-    # subclassing. A genuine cross-encoder has no encode() and is still
-    # rejected.
     if not (
         isinstance(processor, EmbeddingProcessor)
         or callable(getattr(processor, "encode", None))
@@ -243,9 +230,6 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
         ),
         dtype=np.float32,
     )
-    # A processor whose query vector is not encode(query) - a composed
-    # rewriter, say - exposes encode_queries(). Calling plain encode() there
-    # would report bare-retriever vectors under the composed model's name.
     encode_queries = getattr(processor, "encode_queries", None)
     if encode_queries is not None:
         print(
@@ -339,8 +323,6 @@ def run_pairwise(
         own_doc = self_pos.get(row)
         if own_doc is not None:
             beaten = beaten & (np.asarray(positions) != own_doc)
-        # Inserting all 1000 rephrased copies would need 1000 extra forward
-        # passes per query, so that reading is not computed for pair scorers.
         per_query[row] = {
             "per-query-candidates": (1 + int(np.sum(beaten)), None, own)
         }
@@ -391,8 +373,6 @@ def run_lexical(model_key, args, corpus_texts, rephrased_texts, query_texts, que
                 tokenizer=math_word_tokens, token_pattern=None, lowercase=False
             )
         else:
-            # sklearn's default regex tokenizer plus lowercasing, matching
-            # TfidfProcessor(tokenize_approach0=False).
             vectorizer = TfidfVectorizer()
         doc_matrix = vectorizer.fit_transform(corpus_texts + rephrased_texts)
         n_corpus = len(corpus_texts)
@@ -477,10 +457,6 @@ def run_one_model(
             print(f"[~] {regime}: not available for {model_key} - skipped.")
             continue
 
-        # self_pos counts queries whose own document is anywhere in the
-        # corpus, which is only the right number for the all-documents regime.
-        # In the per-query regime a query's own document is never among its own
-        # candidates, so report what this regime actually excluded.
         if regime == "all-documents" or restrict is None:
             n_excluded = len(self_pos)
         else:
@@ -657,9 +633,6 @@ def main() -> None:
         )
     )
 
-    # approach0 is the one exclusion: its _BROKEN_QUERIES skip-list is keyed
-    # to raw benchmark query text, so a rephrased insertion is not in it and
-    # would segfault on exactly the rows this experiment is about.
     eligible = [k for k in rr.ALL_MODEL_KEYS if k not in DEDUP_EXCLUDED]
     models = args.models or eligible
     excluded = [m for m in models if m in DEDUP_EXCLUDED]

@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-
 import argparse
 from pathlib import Path
 
+from datasets import load_dataset
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import yaml
-from datasets import load_dataset
 
+
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -110,7 +105,6 @@ def main(argv=None) -> None:
 
     x_vals = np.arange(n_per_query)
 
-
     sns.set_style("whitegrid")
 
     plt.rcParams.update(
@@ -161,7 +155,6 @@ def main(argv=None) -> None:
     plt.tight_layout()
 
     plt.savefig(f"signal_{tag}_cumulative_proportions.pdf", dpi=300, bbox_inches="tight")
-
 
 if __name__ == "__main__":
     main()

@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
 from pathlib import Path
@@ -26,7 +21,6 @@ def load(directory: Path) -> dict:
             out[path.stem] = payload
     return out
 
-
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan", type=Path, default=Path("results/timing"))
@@ -40,18 +34,14 @@ def main(argv=None) -> None:
     rows = []
     for key, entry in timings.items():
         name, category = MODEL_INFO.get(key, (key, "?"))
-        previous = entry.get("previous_measurement") or {}
         rows.append(
             {
                 "key": key,
                 "name": name,
                 "category": category,
-                "source": "retimed" if previous else "current",
                 "mean": entry["mean_seconds"],
                 "median": entry["median_seconds"],
                 "backend": entry.get("backend", "?"),
-                "old_mean": previous.get("mean_seconds"),
-                "old_backend": previous.get("backend"),
             }
         )
     rows.sort(key=lambda r: r["median"])
@@ -64,47 +54,18 @@ def main(argv=None) -> None:
         "",
         "# SABER-Math — Per-query latency",
         "",
-        "| Model | Category | Src | Backend | Median (s) | Mean (s) | vs previous |",
-        "|---|---|---|---|---|---|---|",
+        "| Model | Category | Backend | Median (s) | Mean (s) |",
+        "|---|---|---|---|---|",
     ]
     for row in rows:
-        change = ""
-        if row["source"] == "retimed" and row["old_mean"] is not None:
-            factor = row["mean"] / row["old_mean"] if row["old_mean"] else 0
-            change = f"{factor:.2f}x"
-            if row["old_backend"] and row["old_backend"] != row["backend"]:
-                change += f" ({row['old_backend']} -> {row['backend']})"
         body.append(
-            f"| {row['name']} | {row['category']} | {row['source']} | "
-            f"{row['backend']} | {row['median']:.3f} | {row['mean']:.3f} | {change} |"
+            f"| {row['name']} | {row['category']} | {row['backend']} | "
+            f"{row['median']:.3f} | {row['mean']:.3f} |"
         )
-
-    changed = [r for r in rows if r["source"] == "retimed"]
-    if changed:
-        body += [
-            "",
-            "## Retimed after the input-protocol change",
-            "",
-            "These are the models whose production inputs changed, so their",
-            "previous timings measured a configuration production no longer runs.",
-            "",
-            "| Model | Previous mean (s) | Current mean (s) | Factor |",
-            "|---|---|---|---|",
-        ]
-        for row in sorted(changed, key=lambda r: r["name"]):
-            if row["old_mean"] is None:
-                continue
-            factor = row["mean"] / row["old_mean"] if row["old_mean"] else 0
-            body.append(
-                f"| {row['name']} | {row['old_mean']:.3f} | {row['mean']:.3f} | "
-                f"{factor:.2f}x |"
-            )
-        body.append("")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text("\n".join(body))
-    print(f"[+] {len(rows)} models ({len(changed)} retimed) -> {args.out}")
-
+    print(f"[+] {len(rows)} models -> {args.out}")
 
 if __name__ == "__main__":
     main()

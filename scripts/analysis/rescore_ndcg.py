@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import get_args
 
@@ -16,10 +10,10 @@ from sabermath.data import load_data
 from sabermath.metrics import compute_ndcg_at_k
 from sabermath.schemas import Branch
 
+
 BRANCHES = list(get_args(Branch))
 
 DEFAULT_VARIANTS = ["linear:1.0", "exponent:1.0", "exponent:0.6"]
-
 
 def parse_variant(token: str) -> tuple[str, float]:
     if token == "rank":
@@ -48,12 +42,10 @@ def parse_variant(token: str) -> tuple[str, float]:
         ) from e
     return (variant, scale)
 
-
 def variant_label(variant: str, scale: float) -> str:
     if variant == "rank":
         return "rank"
     return f"{variant}:{scale:g}"
-
 
 def rank_transform(values: np.ndarray) -> np.ndarray:
     order = np.argsort(values)
@@ -65,22 +57,18 @@ def rank_transform(values: np.ndarray) -> np.ndarray:
             ranks[mask] = ranks[mask].mean()
     return ranks
 
-
 def find_run_dirs(scan_root: Path) -> list[Path]:
     return sorted(
         meta.parent for meta in scan_root.glob(".checkpoints/*/*/meta.json")
     )
 
-
 def load_scores_file(path: Path) -> dict[int, dict | None]:
     raw = json.loads(path.read_text())
     return {int(k): v for k, v in raw.items()}
 
-
 def load_ndcg_checkpoint(path: Path) -> dict[int, float | None]:
     raw = json.loads(path.read_text())
     return {int(k): v for k, v in raw.items()}
-
 
 def rescore_run(
     run_dir: Path,
@@ -184,7 +172,6 @@ def rescore_run(
     return {
         "model_key": meta["model_key"],
         "instruction_key": meta.get("instruction_key"),
-        "protocol_tag": meta.get("protocol_tag", ""),
         "part": meta.get("part"),
         "query_shard": meta.get("query_shard"),
         "query_shards": meta.get("query_shards"),
@@ -196,7 +183,6 @@ def rescore_run(
         "per_query": per_query_out,
         "self_checks": checks,
     }
-
 
 def summarize_rows(row_ndcgs: dict[int, float], domains_by_row) -> dict:
     values = list(row_ndcgs.values())
@@ -221,7 +207,6 @@ def summarize_rows(row_ndcgs: dict[int, float], domains_by_row) -> dict:
         "branches": branches,
     }
 
-
 def pool_results(results: list[dict], domains_by_row) -> dict:
     pooled: dict[str, dict[str, dict[int, float]]] = {}
     for result in results:
@@ -243,14 +228,12 @@ def pool_results(results: list[dict], domains_by_row) -> dict:
     return {
         "model_key": head["model_key"],
         "instruction_key": head["instruction_key"],
-        "protocol_tag": head.get("protocol_tag", ""),
         "n": head.get("n"),
         "seed": head.get("seed"),
         "k": head["k"],
         "run_dirs": [r["run_dir"] for r in results],
         "tasks": tasks_out,
     }
-
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -293,7 +276,7 @@ def main(argv=None) -> None:
         subset = (
             "" if result["n"] is None else f"__n{result['n']}_seed{result['seed']}"
         )
-        tag = f"__{result['protocol_tag']}" if result.get("protocol_tag") else ""
+        tag = ""
         disc = ""
         if result.get("query_shards"):
             disc += f"__shard{result['query_shard']}of{result['query_shards']}"
@@ -336,7 +319,6 @@ def main(argv=None) -> None:
             (
                 result["model_key"],
                 result["instruction_key"],
-                result.get("protocol_tag", ""),
                 result.get("n"),
                 result.get("seed"),
             ),
@@ -352,13 +334,12 @@ def main(argv=None) -> None:
             print(
                 f"[~] Pooled {len(pooled['run_dirs'])} part/shard runs for "
                 f"{pooled['model_key']} / {pooled['instruction_key']}"
-                + (f" [{pooled['protocol_tag']}]" if pooled["protocol_tag"] else "")
             )
 
     if args.export_table is not None:
         table = {}
         for pooled in pooled_results:
-            tag = f"__{pooled['protocol_tag']}" if pooled["protocol_tag"] else ""
+            tag = ""
             key = f"{pooled['model_key']}__{pooled['instruction_key']}{tag}"
             table[key] = {
                 task: {
@@ -375,7 +356,6 @@ def main(argv=None) -> None:
         raise SystemExit(
             "Self-checks failed for: " + ", ".join(sorted(set(failed_checks)))
         )
-
 
 if __name__ == "__main__":
     main()

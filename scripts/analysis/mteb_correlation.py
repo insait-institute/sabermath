@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-
 import argparse
-import re
-import unicodedata
 from pathlib import Path
+import re
 from typing import Final
+import unicodedata
 
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 
-from sabermath.tables import MODEL_INFO, build_rows, collect
 from sabermath.results import DEFAULT_RESULTS_DIR
+from sabermath.tables import MODEL_INFO, build_rows, collect
 
 
 MODEL_COL: Final[str] = "Model"
 RETRIEVAL_SCORE_COL: Final[str] = "Retrieval"
 
-# Optional: only used for display / duplicate tie-breaking if present.
 BORDA_RANK_COL: Final[str] = "Rank (Borda)"
 
 BENCHMARK_OVERALL_RANK_COL: Final[str] = "benchmark_overall_rank"
@@ -32,18 +25,6 @@ MTEB_RETRIEVAL_RANK_MATCHED_COL: Final[str] = "mteb_retrieval_rank_among_matched
 
 LINK_RE = re.compile(r"^\[([^\]]+)\]\((.*)\)$")
 
-
-# Which MTEB leaderboard model each SABER-Math model corresponds to.
-#
-# The Overall scores themselves are NOT stored here: they are read live from
-# results/ (see load_benchmark_overall), because "MTEB does not predict
-# mathematical performance" is a headline claim and a hand-copied score list
-# goes stale silently - the correlation keeps computing, just against numbers
-# that no longer match the tables.
-#
-# A None means there is no obvious matching MTEB leaderboard model, so the
-# row is carried for context but left out of the correlation. If you know the
-# exact MTEB name for a baseline, fill it in.
 MTEB_MODEL_NAMES: Final[dict[str, str | None]] = {
     "octen-embedding-8b": "Octen-Embedding-8B",
     "octen-embedding-4b": "Octen-Embedding-4B",
@@ -68,12 +49,12 @@ MTEB_MODEL_NAMES: Final[dict[str, str | None]] = {
     "roberta-base": None,
 }
 
-
 def load_benchmark_overall(
     results_dir: Path | str = DEFAULT_RESULTS_DIR,
 ) -> list[dict[str, object]]:
     runs, ranks = collect(Path(results_dir))
-    by_key = {row["key"]: row for row in build_rows(runs, ranks)}
+    rows, _pending = build_rows(runs, ranks)
+    by_key = {row["key"]: row for row in rows}
 
     rows, missing = [], []
     for model_key, mteb_name in MTEB_MODEL_NAMES.items():
@@ -97,7 +78,6 @@ def load_benchmark_overall(
         )
     return rows
 
-
 def normalize_mteb_model_name(value: object) -> str:
     if pd.isna(value):
         return ""
@@ -108,14 +88,12 @@ def normalize_mteb_model_name(value: object) -> str:
         return match.group(1).strip()
     return s
 
-
 def canonical_model_name(value: object) -> str:
     s = normalize_mteb_model_name(value)
     s = unicodedata.normalize("NFKC", s)
     s = re.sub(r"[‐‑‒–—−]", "-", s)
     s = re.sub(r"\s+", " ", s)
     return s.strip().lower()
-
 
 def numeric_series(series: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
@@ -142,7 +120,6 @@ def numeric_series(series: pd.Series) -> pd.Series:
     )
 
     return pd.to_numeric(extracted, errors="coerce")
-
 
 def is_excluded_for_new_models_only(row: pd.Series) -> bool:
     names = [
@@ -174,7 +151,6 @@ def is_excluded_for_new_models_only(row: pd.Series) -> bool:
             return True
 
     return False
-
 
 def build_benchmark_scores(
     new_models_only: bool = False,
@@ -224,7 +200,6 @@ def build_benchmark_scores(
 
     return benchmark
 
-
 def load_mteb_csv(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     if not path.exists():
@@ -272,7 +247,6 @@ def load_mteb_csv(path: str | Path) -> pd.DataFrame:
     )
 
     return mteb
-
 
 def compute_correlations(
     mteb_csv_path: str | Path,
@@ -388,7 +362,6 @@ def compute_correlations(
         matched,
     )
 
-
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mteb-file", required=True, type=Path)
@@ -408,7 +381,6 @@ def parse_args(argv=None) -> argparse.Namespace:
         ),
     )
     return parser.parse_args(argv)
-
 
 def main(argv=None) -> None:
     args = parse_args(argv)
@@ -466,7 +438,6 @@ def main(argv=None) -> None:
             float_format=lambda x: f"{x:.4f}",
         )
     )
-
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,4 @@
 from loguru import logger
-import re
 import os
 from tqdm import tqdm
 from google import genai
@@ -11,7 +10,7 @@ from anthropic.types import ThinkingBlock, TextBlock
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
 import requests
 import json

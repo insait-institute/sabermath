@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
 from pathlib import Path
@@ -11,6 +6,7 @@ from pathlib import Path
 from sabermath import registry as rr
 from sabermath.results import parse_result_name
 from sabermath.tables import BRANCH_TO_DOMAIN, DOMAINS, MODEL_INFO
+
 
 TASKS = ["statement-statement", "statement-full", "full-full"]
 PROMPT_LABELS = {
@@ -21,14 +17,11 @@ PROMPT_LABELS = {
     "pm": "pm (repo math)",
 }
 
-
-def load(scan: Path, protocol_tag: str) -> dict:
+def load(scan: Path) -> dict:
     cells = {}
     for path in sorted(scan.glob("*.json")):
         parsed = parse_result_name(path.stem)
         if parsed is None or parsed["part"] or parsed["shard"] or parsed["subset"]:
-            continue
-        if parsed["protocol_tag"] != protocol_tag:
             continue
         try:
             payload = json.loads(path.read_text())
@@ -50,9 +43,6 @@ def load(scan: Path, protocol_tag: str) -> dict:
                 domain = BRANCH_TO_DOMAIN.get(branch["branch"].lower())
                 if domain is None:
                     continue
-                # Domain cells reuse the task's own coverage: a branch has no
-                # separate n_done, and its nDCG is the mean over exactly the
-                # queries of that domain the task actually scored.
                 by_task[(task["task"], domain)] = (
                     branch["ndcg_at_k"],
                     done,
@@ -60,7 +50,6 @@ def load(scan: Path, protocol_tag: str) -> dict:
                 )
         cells[(model_key, parsed["instruction_key"])] = by_task
     return cells
-
 
 def mean_delta(cells, model_keys, prompt, slot, base_prompt="p0"):
     deltas = []
@@ -73,7 +62,6 @@ def mean_delta(cells, model_keys, prompt, slot, base_prompt="p0"):
     if not deltas:
         return None, 0, 0
     return sum(deltas) / len(deltas), len(deltas), sum(1 for d in deltas if d > 0)
-
 
 def summary_block(cells, groups, prompts, slot, label) -> list[str]:
     header = [label] + [PROMPT_LABELS.get(p, p) for p in prompts if p != "p0"] + ["n"]
@@ -93,7 +81,6 @@ def summary_block(cells, groups, prompts, slot, label) -> list[str]:
         lines.append("| " + " | ".join(row) + " |")
     return lines
 
-
 def cell_text(cells, model_key, prompt, task, base_prompt="p0") -> str:
     entry = cells.get((model_key, prompt), {}).get(task)
     if entry is None:
@@ -107,7 +94,6 @@ def cell_text(cells, model_key, prompt, task, base_prompt="p0") -> str:
         if base is not None and base[1] == done:
             text += f" ({score - base[0]:+.4f})"
     return text
-
 
 def block(cells, model_keys, prompts, task) -> list[str]:
     header = ["Model"] + [PROMPT_LABELS.get(p, p) for p in prompts] + ["best"]
@@ -131,11 +117,9 @@ def block(cells, model_keys, prompts, task) -> list[str]:
         lines.append("| " + " | ".join(row) + " |")
     return lines
 
-
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan", type=Path, default=Path("results/evaluation"))
-    parser.add_argument("--protocol-tag", type=str, default="")
     parser.add_argument("--prompts", nargs="+", default=["p0", "p1", "p2", "p3"])
     parser.add_argument("--tasks", nargs="+", default=TASKS)
     parser.add_argument(
@@ -143,7 +127,7 @@ def main(argv=None) -> None:
     )
     args = parser.parse_args(argv)
 
-    cells = load(args.scan, args.protocol_tag)
+    cells = load(args.scan)
     if not cells:
         raise SystemExit(f"No completed runs under {args.scan}")
 
@@ -164,9 +148,7 @@ def main(argv=None) -> None:
         "",
         "# SABER-Math — Instruction-prompt ablation",
         "",
-        f"Source: `{args.scan}`" + (
-            f" (protocol tag `{args.protocol_tag}`)" if args.protocol_tag else ""
-        ),
+        f"Source: `{args.scan}`",
         "",
         "All numbers are nDCG@10. `p0` is the no-instruction baseline; the",
         "parenthesised value is the change from it.",
@@ -309,7 +291,6 @@ def main(argv=None) -> None:
         f"[+] {len(models)} models ({len(instructable)} instructable, "
         f"{len(controls)} control) -> {args.out}"
     )
-
 
 if __name__ == "__main__":
     main()

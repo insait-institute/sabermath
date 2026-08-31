@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
-import json
-import random
 from collections import defaultdict
+import json
 from pathlib import Path
+import random
 
 import numpy as np
 
+
 USAGE = """\
   python -m sabermath.analysis.compute_confidence_intervals results/evaluation/*.json
-
-Reads the per-query nDCGs a run already saved, so it re-runs no model and needs
-no vector cache. Exclude smoke-test files (*__n20_seed42.json) from the glob.
-See docs/experiment-confidence-intervals.md for the bootstrap protocol.
 """
 
 DOMAINS = [
@@ -31,10 +23,8 @@ DOMAIN_SAMPLE_COUNT = 300
 X = 10000
 SEED = 42411
 
-
 def confidence_interval_95(values):
     return [float(np.percentile(values, 2.5)), float(np.percentile(values, 97.5))]
-
 
 def get_task_confidence(task_ndcgs, domain_idxs, all_idxs, task, x=X):
     rng = random.Random(SEED)
@@ -73,7 +63,6 @@ def get_task_confidence(task_ndcgs, domain_idxs, all_idxs, task, x=X):
         "mean": float(np.mean(samples["total"])),
         "branches": branch_dict,
     }
-
 
 def process_file(path: Path, out_dir: Path) -> None:
     data = json.loads(path.read_text())
@@ -120,7 +109,6 @@ def process_file(path: Path, out_dir: Path) -> None:
                 f"[{lo:.4f}, {hi:.4f}]"
             )
 
-
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         epilog=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -148,7 +136,6 @@ def main(argv=None) -> None:
             print(f"[~] Skipping smoke-test file {path.name}.")
             continue
         process_file(path, args.out_dir)
-
 
 if __name__ == "__main__":
     main()

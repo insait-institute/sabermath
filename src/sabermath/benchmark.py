@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Callable, Literal, get_args
 from pathlib import Path
 import json
-import re
 
 import numpy as np
 from tqdm import tqdm
@@ -24,7 +23,6 @@ from sabermath.schemas import (
 )
 from sabermath.processors import (
     ModelProcessor,
-    EmbeddingProcessor,
     SentenceTransformersProcessor as STProcessor,
     VLLMProcessor,
     UnknownProcessor,

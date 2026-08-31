@@ -22,7 +22,7 @@ questions and must never be merged into one table.**
 | Regime | What the copy competes against |
 |---|---|
 | `per-query-candidates` | That query's own 150 candidates — ranked among 151. **The published protocol.** Every model can run it. |
-| `all-documents` | All 71,117 documents. Much harder, no published reference. Bi-encoders and lexical models only. |
+| `all-documents` | All 71,117 documents. Much harder. Bi-encoders and lexical models only. |
 
 `all-documents` excludes pair scorers because a cross-encoder or
 late-interaction model would need 71,117 forward passes per query.
@@ -39,17 +39,22 @@ Each regime reports avg/median rank and top@{1,2,4,…,128} under both:
 - **Self-matches are excluded by default.** 92.8% of query problems appear
   verbatim among the documents, so leaving them in measures exact-duplicate
   retrieval rather than rephrase retrieval. `--keep-self-match` disables the
-  exclusion; the published rows do not use it.
+  exclusion.
 - **`--doc-version full` pairs the rephrased problem with the ORIGINAL
   solution** — the dataset has no rephrased solutions.
-- **The lexical rows use different tokenizer configurations from the main
-  table**, so a dedup row is not comparable to that model's Table 1 row.
+- **The lexical rows use the same tokenizers as the main table**: the plain
+  keys run the Approach Zero tokenizer, the `-no-tok` keys each method's own
+  default. A dedup row and that model's main-table row are the same
+  configuration.
 
 ## Checking your setup
 
-Reproduce two published rows before trusting new ones: Octen-8B avg rank
-**6.85**, BM25 **24.09**, both under `per-query-candidates` with self-matches
-excluded.
+Under `per-query-candidates` with self-matches excluded, Octen-8B should give
+avg rank **6.85** / median **2.0**.
+
+Do not check BM25 against the older figure of 24.09: that was produced with a
+whitespace tokenizer, which here is the separate `bm25-no-tok` key (24.02).
+Production `bm25` runs the Approach Zero tokenizer and gives **26.98**.
 
 ## Splitting a slow model
 

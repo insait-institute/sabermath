@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-
 import argparse
 import json
 from pathlib import Path
-from datasets import load_dataset
 from typing import Any, Mapping
 
-import numpy as np
-from matplotlib.ticker import PercentFormatter
+from datasets import load_dataset
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+import numpy as np
 import seaborn as sns
 import yaml
 
@@ -28,38 +21,21 @@ from sabermath.figures import (
 from sabermath.math_vs_word.sim_helpers import get_math_words_tokens
 from sabermath.math_vs_word import PLOTS_DIR, SIMILARITIES_DIR
 
-# Plotted unless --all is passed.
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 MODEL_IDS = [
-    # Ordered by the paper's main results table, best Overall first, so the
-    # legend reads in the order a reader just saw there.
     "reason-rewriter-reason-embed-8b",  # ReasonRewriter + ReasonEmbed-Qwen3-8B
-    "hanhainebula/reason-embed-qwen3-8b-0928",  # ReasonEmbed-Qwen3-8B
-    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes",  # RaDeR-7B
-    "AQ-MedAI/Diver-Retriever-4B",  # Diver-4B
+    "hanhainebula/reason-embed-qwen3-8b-0928",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes", 
+    "AQ-MedAI/Diver-Retriever-4B", 
     "google/gemini-embedding-2",
     "Qwen/Qwen3-Embedding-8B",
-    "google/embeddinggemma-300m",  # Gemma-300m
+    "google/embeddinggemma-300m", 
     "BAAI/bge-m3",
     "approach0",
     "tf-idf",
-    "google-bert/bert-base-uncased",  # BERT (Base)
+    "google-bert/bert-base-uncased",  
 ]
-
-# Plotted under --all. Each id needs a matching file in SIMILARITIES_DIR.
-
-
-
-# Overridable from the YAML config with `model_display_names`.
-
-
-# Same family, same marker; individual models differ by colour.
-
-
-# Overridable from the YAML config with `model_colors`. Models sharing a
-# marker take visibly distinct colours.
-
-
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -84,7 +60,6 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     config_file = args.config_file
 
-
     def _normalize_instruction_suffix(value: str | None) -> str | None:
         if value is None:
             return None
@@ -96,7 +71,6 @@ def main(argv=None) -> None:
                 f"--instruction must be 1/2/3 or p1/p2/p3, got {value!r}"
             )
         return f"p{key}"
-
 
     INSTRUCTION_SUFFIX = _normalize_instruction_suffix(args.instruction)
 
@@ -116,10 +90,8 @@ def main(argv=None) -> None:
     TEXT_KEY = "pr_text_vs_candidates"
     MATH_KEY = "pr_math_vs_candidates"
 
-
     def model_to_file_stem(model_id: str) -> str:
         return model_id.replace("/", "_")
-
 
     def model_to_display_name(
         model_id: str,
@@ -135,7 +107,6 @@ def main(argv=None) -> None:
             return "Math-token ratio"
 
         return model_id.split("/")[-1]
-
 
     def model_to_marker_symbol(
         model_id: str,
@@ -153,7 +124,6 @@ def main(argv=None) -> None:
             "`model_marker_symbols` in the YAML config."
         )
 
-
     def model_to_color(
         model_id: str,
         model_colors: Mapping[str, str] | None = None,
@@ -170,7 +140,6 @@ def main(argv=None) -> None:
             "`model_colors` in the YAML config."
         )
 
-
     def load_similarity_content(model_id: str) -> dict[str, dict[str, Any]]:
         model_name = model_to_file_stem(model_id)
         baseline_path = SIMILARITIES_DIR / f"{model_name}.json"
@@ -181,8 +150,6 @@ def main(argv=None) -> None:
             if instructed_path.exists():
                 path = instructed_path
             else:
-                # The lexical methods are excluded from instructions and never
-                # get a __pN file; fall back rather than failing the whole plot.
                 print(
                     f"[~] No {instructed_path.name} for {model_id!r} - "
                     f"falling back to its baseline file ({baseline_path.name})."
@@ -196,7 +163,6 @@ def main(argv=None) -> None:
         with path.open("r", encoding="utf-8") as f:
             return json.load(f)
 
-
     def get_first_domain(domains):
         if isinstance(domains, (list, tuple)):
             if len(domains) == 0:
@@ -207,7 +173,6 @@ def main(argv=None) -> None:
             raise ValueError("Encountered None domain.")
 
         return str(domains).strip()
-
 
     def build_id_to_domain(
         *,
@@ -238,7 +203,6 @@ def main(argv=None) -> None:
 
         return id_to_domain
 
-
     def target_math_token_ratio(target: Mapping[str, Any]) -> float:
 
         target_math_tokens, target_text_tokens = get_math_words_tokens(
@@ -255,13 +219,6 @@ def main(argv=None) -> None:
 
         return float(len(target_math_tokens) / total_tokens)
 
-
-    # Models whose scores are coarse enough that an exact math_score ==
-    # text_score tie is expected rather than a bug: discrete rank fractions
-    # (grouprank), integer 0-100 scores (Retro*), or an fp16 similarity band
-    # narrow enough that quantization collapses distinct scores (the inf
-    # retrievers). A tie from any OTHER model is raised - in a continuous-score
-    # model it is worth investigating, not silently skipping.
     MODELS_WITH_EXPECTED_TIES = {
         "jaccard",
         "diver-grouprank-32b",
@@ -270,7 +227,6 @@ def main(argv=None) -> None:
         "retro-star-32b",
         "retro-star-32b-rewritten",
     }
-
 
     def aggregate_maths_greater_than_words_by_domain(
         content: Mapping[str, Mapping[str, Any]],
@@ -346,7 +302,6 @@ def main(argv=None) -> None:
         }
 
         return percentages, m_greater_w_counts, totals
-
 
     def aggregate_target_math_token_ratio_by_domain(
         *,
@@ -430,7 +385,6 @@ def main(argv=None) -> None:
 
         return average_ratio_percentages, average_ratios, totals
 
-
     def plot_maths_greater_than_words_points(
         percentages_by_model: Mapping[str, Mapping[str, float]],
         *,
@@ -459,7 +413,6 @@ def main(argv=None) -> None:
         group_spacing = 1.45
         x = np.arange(len(GROUP_NAMES)) * group_spacing
 
-        # The math-token ratio is drawn as a dashed line, not as a scatter marker.
         scatter_model_ids = [
             model_id for model_id in plot_model_ids if model_id != MATH_TOKEN_RATIO_MODEL_ID
         ]
@@ -476,17 +429,12 @@ def main(argv=None) -> None:
                 n_scatter_models,
             )
 
-        # tight_layout does not run under an outside legend (see below), so the
-        # axes keep their narrower default box and the domain labels overlap.
-        # Widen the canvas to compensate.
         small = n_scatter_models <= 12 and not legend_outside
         fig_width = 15 if small else 18
         fig_height = 8 if small else 9
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=150)
 
         ax.set_facecolor((0.97, 0.97, 0.97))
-
-
 
         for i, model_id in enumerate(scatter_model_ids):
             vals = [percentages_by_model[model_id][group] for group in GROUP_NAMES]
@@ -513,8 +461,6 @@ def main(argv=None) -> None:
                 zorder=3,
             )
 
-        # The math-token ratio is a dashed segment spanning each domain column,
-        # not a marker.
 
         if MATH_TOKEN_RATIO_MODEL_ID in plot_model_ids:
             math_ratio_vals = [
@@ -532,7 +478,6 @@ def main(argv=None) -> None:
                 display_names=display_names,
             )
 
-            # Deliberately wider than the marker cluster.
             ratio_line_half_width = group_spacing * 0.34
 
             for j, y_val in enumerate(math_ratio_vals):
@@ -574,8 +519,6 @@ def main(argv=None) -> None:
         sns.despine(ax=ax, left=True, bottom=True)
 
         if legend_outside:
-            # An in-plot legend swallows whole domain columns at ~40 models.
-            # Wide and shallow below the axes scales by adding columns instead.
             legend = ax.legend(
                 loc="upper center",
                 bbox_to_anchor=(0.5, -0.12),
@@ -602,9 +545,6 @@ def main(argv=None) -> None:
         legend.set_zorder(10)
 
         if not legend_outside:
-            # Not under an outside legend: tight_layout would grow the axes box
-            # down into the gap the legend is anchored in, landing it on the
-            # second line of the two-line domain labels.
             plt.tight_layout()
 
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -618,7 +558,6 @@ def main(argv=None) -> None:
         plt.show()
 
         return fig, ax
-
 
     with open(config_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -655,7 +594,6 @@ def main(argv=None) -> None:
         percentages_by_model[model_id] = percentages
         counts_by_model[model_id] = counts
         totals_by_model[model_id] = totals
-
 
     math_token_ratio_percentages, math_token_ratio_averages, math_token_ratio_totals = (
         aggregate_target_math_token_ratio_by_domain(
@@ -699,9 +637,6 @@ def main(argv=None) -> None:
         model_colors=model_colors,
         y_min=0.0,
         legend_fontsize=12 if args.all else 17,
-        # --all goes outside the axes; the selected figure keeps a single-column
-        # in-plot legend, which is a tight fit at these label lengths. If it
-        # starts covering points, use legend_outside=True with legend_ncol=3.
         legend_ncol=6 if args.all else 1,
         legend_outside=args.all,
         output_path=str(PLOTS_DIR / output_filename),
@@ -722,7 +657,6 @@ def main(argv=None) -> None:
         avg_ratio_pct = math_token_ratio_percentages[group]
         total = math_token_ratio_totals[group]
         print(f"  {group}: {avg_ratio:.4f} = {avg_ratio_pct:.1f}% over {total} targets")
-
 
 if __name__ == "__main__":
     main()

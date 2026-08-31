@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
-import sys
+import argparse
+import os
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 from datasets import load_dataset, Dataset
-import sys
-from pathlib import Path
-from loguru import logger
 from huggingface_hub import login
-import os
-import argparse
+from loguru import logger
 import tqdm
 import yaml
 
-login(token=os.environ["HF_TOKEN"])
-
-sys.path.append(str(Path(__file__).resolve().parents[2]))
 from sabermath.llm_executor import QueryExecutor
 from sabermath.llm_api import APIQuery
 from sabermath.llm_postprocess import fix_thinking
 
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 SAVE_EVERY_SUCCESSFUL_PROMPTS = 1000
 
@@ -49,7 +40,6 @@ def extract_boxed(text: str) -> list[str]:
 
     return results
 
-
 PROMPT = r"""Role: You are a LaTeX Formatting Expert specializing in mathematical notation standardization.
 
 Task: You will be provided with mathematical text (problems or solutions). Your task is to standardize the LaTeX formatting and enclose the entire final result within a \boxed{{...}} command.
@@ -68,7 +58,6 @@ Input: If the radius r is 5, find the area. Use \( \pi \).
 Output: \boxed{{If the radius $r$ is $5$, find the area. Use $\pi$.}}
 """
 
-
 DEFAULT_CONFIG = CONFIG_DIR / "math_vs_word.yaml"
 
 
@@ -84,6 +73,10 @@ def main(argv=None) -> None:
     )
 
     args = parser.parse_args(argv)
+
+    # After parse_args, so --help works without a token.
+    login(token=os.environ["HF_TOKEN"])
+
     config_path = args.config_file
 
     with open(config_path, "r") as f:
@@ -370,7 +363,6 @@ def main(argv=None) -> None:
     )
 
     print("Done.")
-
 
 if __name__ == "__main__":
     main()

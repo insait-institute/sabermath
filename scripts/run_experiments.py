@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import multiprocessing as mp
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sabermath import registry as R
 from sabermath.instructions import INSTRUCTIONS
@@ -209,8 +206,6 @@ def main() -> None:
         )
         print("#" * 60)
 
-        # One subprocess per model: a CUDA crash or OOM must not take down the
-        # loop or corrupt results already on disk.
         p = ctx.Process(
             target=run_model,
             kwargs={

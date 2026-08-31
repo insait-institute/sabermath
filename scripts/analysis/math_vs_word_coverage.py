@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-
 import argparse
 import ast
 import json
 from pathlib import Path
+
 from sabermath.math_vs_word import SIMILARITIES_DIR
+from sabermath.math_vs_word.load_models import get_scores_kwargs
+
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 HERE = Path(__file__).resolve().parent
-EXPECTED_TARGETS = 969  # RAG4Math/targets_fixed_filtered_latex, train split
+EXPECTED_TARGETS = 969
 SIM_FIELDS = (
     "pr_full_vs_candidates",
     "pr_math_vs_candidates",
@@ -21,18 +18,11 @@ SIM_FIELDS = (
 )
 NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
 
-
 def envelope_for(method: str) -> dict | None:
-    import sys
-
-    sys.path.insert(0, str(HERE))
     try:
-        from .load_models import get_scores_kwargs
-
         return dict(get_scores_kwargs(method, "p0"))
     except Exception:
         return None
-
 
 def literal_env(path: Path, env: dict | None = None) -> dict:
     env = {} if env is None else env
@@ -66,7 +56,6 @@ def literal_env(path: Path, env: dict | None = None) -> dict:
                 pass  # not a plain literal - irrelevant to the roster
     return env
 
-
 def allowed_models(path: Path, extra_sources: list[Path]) -> list[str]:
     env: dict[str, object] = {}
     for source in extra_sources:
@@ -78,7 +67,6 @@ def allowed_models(path: Path, extra_sources: list[Path]) -> list[str]:
     if not models:
         raise SystemExit(f"Could not read ALLOWED_MODELS from {path}")
     return list(models)
-
 
 def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, str]:
     stem = method.replace("/", "_")
@@ -104,7 +92,6 @@ def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, st
     if n > EXPECTED_TARGETS:
         return "bad", f"{n} targets, expected {EXPECTED_TARGETS}"
     return "ok", f"{n}/{EXPECTED_TARGETS}"
-
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -210,7 +197,6 @@ def main(argv=None) -> None:
     if not broken:
         print("\nNothing to run.")
     raise SystemExit(1 if broken else 0)
-
 
 if __name__ == "__main__":
     main()

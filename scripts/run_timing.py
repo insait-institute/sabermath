@@ -4,15 +4,11 @@ import asyncio
 import hashlib
 import json
 import os
+from pathlib import Path
 import random
-import sys
 import time
 import warnings
-from pathlib import Path
 
-# Must be set before numpy/torch, which read these once at import and cache
-# the pool size. Every published timing number was measured with 16 CPU lanes,
-# so a run on a machine with more cores would not be comparable.
 TIMING_THREADS = os.environ.get("SABERMATH_TIMING_THREADS", "16")
 for _var in (
     "OMP_NUM_THREADS",
@@ -23,8 +19,6 @@ for _var in (
     os.environ.setdefault(_var, TIMING_THREADS)
 
 import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sabermath.benchmark import transform
 from sabermath.data import load_data
@@ -42,8 +36,6 @@ from sabermath.processors import (
     VLLMProcessor,
 )
 
-# Built through the registry's own production builders, so a timing number
-# can never be measured on a backend the benchmark does not score with.
 from sabermath.registry import (  # noqa: E402
     CUSTOM_MODEL_BUILDERS as PRODUCTION_CUSTOM_BUILDERS,
     GENERIC_MODELS as PRODUCTION_GENERIC_MODELS,
@@ -53,19 +45,14 @@ USAGE = """\
   python scripts/run_timing.py --model rank1-32b
   python scripts/run_timing.py --model bm25 --n-queries 30
   python scripts/run_timing.py --model gemini-embedding-2
-
-Every model is timed on its production backend, at 16 documents in flight and
-16 CPU lanes, on the statement-full task. The full measurement protocol - and
-what makes one number comparable to another - is in docs/experiment-timing.md.
 """
 
-# Queries averaged over per model; overridable with --n-queries.
 N_QUERIES = 50
 
 TASK_QUERY_VERSION = "statement"
 TASK_DOC_VERSION = "full"
 SEED = 42
-BATCH_SIZE = 16  # the standardized documents-in-flight count (see docstring)
+BATCH_SIZE = 16
 
 
 class OpenRouterEmbeddingProcessor(EmbeddingProcessor):
@@ -237,15 +224,9 @@ RERANKER_BUILDERS = {
 }
 
 EMBEDDING_BUILDERS = {
-    # Reranker-pipeline bi-encoders: production builders, verbatim.
     "reasonir-8b": _production_custom("reasonir-8b"),
     "reason-embed-qwen3-8b": _production_generic("reason-embed-qwen3-8b"),
     "reason-embed-llama-3.1-8b": _production_generic("reason-embed-llama-3.1-8b"),
-    # Composed rewrite systems. The embedding category's _NO_CACHE is
-    # load-bearing: check_cache governs the REWRITE cache as well as the vector
-    # cache, so turning it off puts generation inside the timed region. A
-    # cached run would time a dict lookup and report a composed system as
-    # costing the same as its embedder half.
     "inf-x-retriever": _production_custom("inf-x-retriever"),
     "reason-rewriter-reason-embed-8b": _production_custom("reason-rewriter-reason-embed-8b"),
     "reason-rewriter-reason-embed-llama-3.1-8b": _production_custom(
@@ -256,11 +237,8 @@ EMBEDDING_BUILDERS = {
     "rader-3b": _production_custom("rader-3b"),
     "rader-7b": _production_custom("rader-7b"),
     "rader-14b": _production_custom("rader-14b"),
-    # SentenceTransformers in production on purpose - see the registry. Its
-    # first query still pays CUDA warmup, so read medians, not means.
     "inf-retriever-v1-pro": _production_custom("inf-retriever-v1-pro"),
     "qwen3-embedding-8b": _production_generic("qwen3-embedding-8b"),
-    # Registry table models on plain vLLM loads.
     "qwen3-embedding-4b": _vllm("Qwen/Qwen3-Embedding-4B"),
     "qwen3-embedding-0.6b": _vllm("Qwen/Qwen3-Embedding-0.6B"),
     "harrier-oss-v1-270m": _vllm("microsoft/harrier-oss-v1-270m"),
@@ -273,8 +251,6 @@ EMBEDDING_BUILDERS = {
     "jina-embeddings-v5-text-small": _vllm("jinaai/jina-embeddings-v5-text-small"),
     "octen-embedding-4b": _vllm("Octen/Octen-Embedding-4B"),
     "octen-embedding-8b": _vllm("Octen/Octen-Embedding-8B"),
-    # The chunked trio - pooler + 512 context, chunk kwargs come via
-    # MODEL_SCORES_KWARGS below.
     "roberta-base": _vllm(
         "FacebookAI/roberta-base",
         pooler_config=dict(_CHUNK512_POOLER),
@@ -291,15 +267,12 @@ EMBEDDING_BUILDERS = {
         pooler_config={"pooling_type": "MEAN", "normalize": True},
         max_model_len=512,
     ),
-    # The one ST holdout (EuroBERT backbone - vLLM-infeasible, see
-    # src/sabermath/registry.py).
     "jina-embeddings-v5-text-nano": _jina_nano_st,
 }
 
 CLOSED_API_BUILDERS = {
     "gemini-embedding-001": lambda: GoogleProcessor("gemini-embedding-001"),
     "gemini-embedding-2": lambda: GoogleProcessor("gemini-embedding-2"),
-    # Via OpenRouter, not OpenAI directly.
     "text-embedding-3-small": lambda: OpenRouterEmbeddingProcessor("text-embedding-3-small"),
     "text-embedding-3-large": lambda: OpenRouterEmbeddingProcessor("text-embedding-3-large"),
 }
@@ -321,43 +294,32 @@ ALL_BUILDERS = {
 
 _NO_CACHE = {"check_cache": False, "update_cache": False}
 
-# Category baselines...
 _CATEGORY_SCORES_KWARGS = {
-    # Every reranker backend exposes a get_scores batch knob except
-    # splade/colbert, which take it at construction instead.
     "reranker": {"batch_size": BATCH_SIZE},
     "embedding": {**_NO_CACHE, "batch_size": BATCH_SIZE},
     "closed_api": {**_NO_CACHE},  # per-model below - APIs differ
     "classical": {"score_batch_size": BATCH_SIZE},
 }
 
-# ...and per-model overrides (replace the category baseline entirely).
 _MODEL_SCORES_KWARGS = {
-    # Constructor-level batching only:
     "splade-code-8b": {},
     "splade-code-0.6b": {},
     "gte-moderncolbert": {},
     "reason-moderncolbert": {},
-    # Production preprocessing protocol rides along with the batch slicing:
     "rader-3b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
     "rader-7b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
     "rader-14b": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 2048},
     "roberta-base": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
     "bert-base-uncased": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
     "multilingual-e5-large": {**_NO_CACHE, "batch_size": BATCH_SIZE, "chunk_to_context": True, "context_length": 512},
-    # Closed APIs - "16 documents in flight", per-API (see docstring):
     "gemini-embedding-001": {**_NO_CACHE, "batch_size": BATCH_SIZE, "max_concurrency": 1},
     "gemini-embedding-2": {**_NO_CACHE, "batch_size": 1, "max_concurrency": BATCH_SIZE},
     "text-embedding-3-small": {**_NO_CACHE, "max_concurrency": BATCH_SIZE},
     "text-embedding-3-large": {**_NO_CACHE, "max_concurrency": BATCH_SIZE},
-    # pya0 exposes no per-document scoring hook, so it is the one genuine
-    # exception to the 16-per-step protocol.
     "retro-star-32b-rewritten-uncached": {**_NO_CACHE, "batch_size": BATCH_SIZE},
     "approach0": {},
 }
 
-# Batching applied at construction rather than get_scores; recorded in the
-# result JSON so no setting is invisible in the output.
 _BUILDER_BATCHING_NOTE = {
     "splade-code-8b": f"query_batch_size={BATCH_SIZE}, document_batch_size={BATCH_SIZE} (constructor)",
     "splade-code-0.6b": f"query_batch_size={BATCH_SIZE}, document_batch_size={BATCH_SIZE} (constructor)",
@@ -573,8 +535,6 @@ def main() -> None:
     print("[~] Loading dataset...")
     queries, documents = load_data()
 
-    # One shared query sample, so a latency table never compares models across
-    # different query sets.
     sample = _load_query_sample(args.save_to)
     query_idxs = sample["query_idxs"]
     print(

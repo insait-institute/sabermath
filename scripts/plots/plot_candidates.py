@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-
 import argparse
+from collections import defaultdict
+from collections.abc import Mapping
 import math
 import re
 import textwrap
-from collections import defaultdict
-from collections.abc import Mapping
 
 from datasets import load_dataset
-
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
-from matplotlib.lines import Line2D
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 TAG_TO_DOMAIN = {

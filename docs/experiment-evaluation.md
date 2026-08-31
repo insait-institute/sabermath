@@ -34,8 +34,9 @@ So in a single environment, run one model or one same-env family per
 invocation. Each model runs in its own spawned subprocess regardless, so a CUDA
 crash or an OOM never takes down the loop or corrupts results already written.
 
-Each env file's postinstall ends with `pip install -e "$SABERMATH_REPO"`, so
-the package's own dependencies come along. See `docs/backend-provenance.md`
+Each env file's postinstall ends with `pip install -e "$SABERMATH_REPO"`,
+which is required rather than convenient: every script imports the installed
+package, so an environment without it cannot run any of them. See `docs/backend-provenance.md`
 for why each pin is load-bearing.
 
 ## Resuming

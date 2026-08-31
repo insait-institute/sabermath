@@ -29,7 +29,6 @@ _LEGACY_NAME_RE = re.compile(
 _NAME_RE = re.compile(
     r"^(?P<model>.+?)"
     r"__(?P<instruction_key>" + "|".join(INSTRUCTION_KEYS) + r")"
-    r"(?:__(?P<protocol_tag>nl1|nl2))?"
     r"(?:__n(?P<n>\d+)_seed(?P<seed>\d+))?"
     r"(?:__shard(?P<shard>\d+)of(?P<shards>\d+))?"
     r"(?:__part-(?P<part>.+))?$"
@@ -45,7 +44,6 @@ def parse_result_name(stem: str) -> dict | None:
     return {
         "model": groups["model"],
         "instruction_key": groups["instruction_key"],
-        "protocol_tag": groups["protocol_tag"] or "",
         "subset": f"n{n}_seed{seed}" if n is not None else "",
         "n": int(n) if n is not None else None,
         "seed": int(seed) if seed is not None else None,
@@ -64,7 +62,6 @@ def parse_unprompted_name(stem: str) -> dict | None:
     return {
         "model": groups["model"],
         "instruction_key": None,
-        "protocol_tag": "",
         "subset": f"n{n}_seed{seed}" if n is not None else "",
         "n": int(n) if n is not None else None,
         "seed": int(seed) if seed is not None else None,

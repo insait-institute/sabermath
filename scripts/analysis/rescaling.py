@@ -1,36 +1,28 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
-import json
-import re
-import sys
 from collections import defaultdict
+import json
 from pathlib import Path
+import re
 
 import numpy as np
+
 
 QUERIES = "INSAIT-Institute/SaberMath-queries"
 TASK = "statement-full"
 REPOS = [Path("/home/dimitadi/saberivo2"), Path("/home/dimitadi/saberstable")]
 SHARD_RE = re.compile(r"__shard\d+of\d+")
 
-# [0,5] relevances are what the dataset stores; [0,3] is a scale of 3/5.
 VARIANTS = [("[0,5] + exponential gain", "exponent", 1.0),
             ("[0,3] + exponential gain", "exponent", 0.6),
             ("[0,5] + linear gain", "linear", 1.0),
             ("[0,3] + linear gain", "linear", 0.6)]
-
 
 def load_queries():
     from datasets import load_dataset
 
     ds = load_dataset(QUERIES, split="train")
     return [np.asarray(x, dtype=float) for x in ds["relevance_scores"]]
-
 
 def ndcg(rel_all, ranking, k=10, gain="exponent", scale=1.0):
     disc = 1.0 / np.log2(np.arange(2, k + 2))
@@ -41,7 +33,6 @@ def ndcg(rel_all, ranking, k=10, gain="exponent", scale=1.0):
     gi = s if gain == "linear" else np.power(2.0, s) - 1.0
     idcg = float(np.sum(gi * disc[: s.size]))
     return 0.0 if idcg == 0 else dcg / idcg
-
 
 TABLE = [
  ("ReasonReranker-Qwen3-32B-Rewrite","retro-star-32b-rewritten",0.741),
@@ -91,7 +82,6 @@ KEYS = {k for _, k, _ in TABLE}
 NAME_OF = {k: n for n, k, _ in TABLE}
 TARGET = {k: t for _, k, t in TABLE}
 
-
 def collect_from_checkpoints(rel):
     groups = defaultdict(list)
     for repo in REPOS:
@@ -135,7 +125,6 @@ def collect_from_checkpoints(rel):
         chosen[mkey] = (src, per_row, ov)
     return chosen, missing
 
-
 def export_rankings(chosen, path, top_k):
     out = {}
     for mkey, (src, per_row, ov) in chosen.items():
@@ -149,7 +138,6 @@ def export_rankings(chosen, path, top_k):
     mb = Path(path).stat().st_size / 1e6
     print(f"[+] wrote {path} - {len(chosen)} models, top-{top_k}, {mb:.3f} MB")
 
-
 def load_rankings(path, rel):
     z = np.load(path)
     chosen = {}
@@ -161,7 +149,6 @@ def load_rankings(path, rel):
         chosen[mkey] = (str(z[f"{mkey}__src"]), per_row, ov)
     missing = [k for k in KEYS if k not in chosen]
     return chosen, missing
-
 
 def verify(rel):
     worst, n_runs = 0.0, 0
@@ -186,12 +173,10 @@ def verify(rel):
           f"per-query value = {worst:.3e}")
     assert worst < 1e-9, "replay does not reproduce the published metric"
 
-
 def pearson(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
     a, b = a - a.mean(), b - b.mean()
     return float(a @ b / np.sqrt((a @ a) * (b @ b)))
-
 
 def rankdata(x):
     x = np.asarray(x, float)
@@ -204,10 +189,8 @@ def rankdata(x):
             r[m] = r[m].mean()
     return r
 
-
 def spearman(a, b):
     return pearson(rankdata(a), rankdata(b))
-
 
 def kendall_tau_b(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
@@ -228,17 +211,14 @@ def kendall_tau_b(a, b):
                 D += 1
     return (C - D) / np.sqrt((C + D + ta) * (C + D + tb))
 
-
 def ranks_desc(x):
     return rankdata([-v for v in x])
-
 
 def inversions(a, b):
     n = len(a)
     disc = sum(1 for i in range(n) for j in range(i + 1, n)
                if (a[i] - a[j]) * (b[i] - b[j]) < 0)
     return disc, n * (n - 1) // 2
-
 
 def latex_table(names, scores, path):
     base_l = VARIANTS[0][0]
@@ -276,7 +256,6 @@ def latex_table(names, scores, path):
     lines += ["        \\bottomrule", "    \\end{tabular}", "\\end{table}", ""]
     Path(path).write_text("\n".join(lines))
     print(f"[+] wrote {path}")
-
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
@@ -380,7 +359,6 @@ def main(argv=None) -> None:
          "models": names, "table": [p[2] for p in prov], "scores": scores,
          "provenance": [list(p) for p in prov]}, indent=1))
     print(f"\n[+] wrote {out}")
-
 
 if __name__ == "__main__":
     main()

@@ -1,48 +1,30 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import csv
 import json
-import re
 from pathlib import Path
+import re
 
 from sabermath.figures import (
-    DEFAULT_MODEL_COLORS,
     DEFAULT_MODEL_DISPLAY_NAMES,
-    DEFAULT_MODEL_MARKER_SYMBOLS,
 )
 
-# parents: [0] analysis, [1] sabermath, [2] src, [3] the repo root.
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[2]
 SVG = REPO / "figure2-latency-mini.svg"
 RESCALING = REPO / "results/rescaling/results.json"
 # Output goes under results/, never next to the source.
 OUT = REPO / "results/latency/data.csv"
 
-# --- Axis calibration, read off the SVG's own gridlines ---------------
-# x: log10 latency in seconds. The "0.01 s" .. "100 s" gridlines sit at
-# x=36.0 .. 338.7, i.e. one decade every (338.7-36.0)/4 px.
 X_AT_1E_MINUS_2, PX_PER_DECADE = 36.0, (338.7 - 36.0) / 4.0
 # y: linear nDCG. The "0.25" gridline is at y=282.0, the "0.75" one at 34.7.
 Y_AT_0_25, PX_PER_NDCG = 282.0, (282.0 - 34.7) / 0.5
 
-
 def to_latency(x_px: float) -> float:
     return 10.0 ** ((x_px - X_AT_1E_MINUS_2) / PX_PER_DECADE - 2.0)
-
 
 def to_ndcg(y_px: float) -> float:
     return 0.25 + (Y_AT_0_25 - y_px) / PX_PER_NDCG
 
-
-# --- The 15 legend entries, keyed by the marker's (fill, shape) -------
-# Values are ids from src/sabermath/analysis/math_vs_word/plot_hist.py, which owns the
-# display name, marker and colour each of these is drawn with. The SVG's own
-# fills and shapes are NOT reused - only its geometry is.
 LEGEND = {
     ("#4B4848", "poly3"): "jaccard",
     ("#5F6368", "plus"): "bm25",
@@ -61,8 +43,6 @@ LEGEND = {
     ("#FF4FD8", "poly3"): "retro-star-32b-rewritten",
 }
 
-# Which frontier line each legend model sits on, in the order the SVG's two
-# step paths visit them. Everything else is an anonymous grey circle.
 BI_ENCODER_FRONTIER = [
     "jaccard",
     "bm25",
@@ -83,17 +63,12 @@ CROSS_FRONTIER = [
     "retro-star-32b-rewritten",
 ]
 
-# The rescaling table names models the way the paper's main table does. Two of
-# its rows are named differently in plot_hist.py (which spells the composed
-# systems out as "ReasonRewriter + <scorer>"); the rest match verbatim.
 RESCALING_NAME_ALIASES = {
     "ReasonEmbed-Qwen3-8B-Rewrite": "reason-rewriter-reason-embed-8b",
     "ReasonReranker-Qwen3-32B-Rewrite": "retro-star-32b-rewritten",
 }
 
-
 def parse_markers(svg_text: str) -> list[dict]:
-    # Stop at the legend box - its swatches are markers too.
     plot = svg_text.split('<rect x="36.0" y="301.0"')[0]
     markers = []
 
@@ -106,8 +81,6 @@ def parse_markers(svg_text: str) -> list[dict]:
                 "y": float(m[2]),
                 "fill": m[3],
                 "shape": "circle",
-                # The 27 anonymous models are the only markers drawn with
-                # opacity; the legend calls them "All other models".
                 "anonymous": "opacity" in m[4],
             }
         )
@@ -116,7 +89,7 @@ def parse_markers(svg_text: str) -> list[dict]:
         r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="(#\w+)"',
         plot,
     ):
-        if m[5] in ("#FFFFFF", "#F7F7F7"):  # canvas and axes background
+        if m[5] in ("#FFFFFF", "#F7F7F7"):
             continue
         markers.append(
             {
@@ -132,8 +105,6 @@ def parse_markers(svg_text: str) -> list[dict]:
         xs, ys = zip(*(tuple(map(float, p.split(","))) for p in m[1].split()))
         markers.append(
             {
-                # A triangle's centroid is not its centre: matplotlib centres
-                # the marker's bounding box, so use that for every polygon.
                 "x": sum(xs) / 3 if len(xs) == 3 else (min(xs) + max(xs)) / 2,
                 "y": (min(ys) + max(ys)) / 2,
                 "fill": m[2],
@@ -142,7 +113,6 @@ def parse_markers(svg_text: str) -> list[dict]:
             }
         )
 
-    # BM25's plus is a stroked path, not a filled shape.
     for m in re.finditer(
         r'<path d="M [\d.]+ ([\d.]+) H [\d.]+ M ([\d.]+) [\d.]+ V [\d.]+" stroke="(#\w+)"',
         plot,
@@ -159,7 +129,6 @@ def parse_markers(svg_text: str) -> list[dict]:
 
     return markers
 
-
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -174,10 +143,6 @@ def main(argv=None) -> None:
 
     rescaling = json.loads(RESCALING.read_text(encoding="utf-8"))
 
-    # plot_hist.py keys models by their HF repo id; the rescaling table keys
-    # them by the display name the paper's main table uses. Join the two
-    # through those names, so a name neither side knows is an error rather
-    # than a silently mislabelled point.
     display_names = DEFAULT_MODEL_DISPLAY_NAMES
     id_by_display_name = {name: mid for mid, name in display_names.items()}
 
@@ -220,8 +185,6 @@ def main(argv=None) -> None:
         if model_id not in taken
     ]
 
-    # Both sides sorted by score: within the 27 that are left, no two models
-    # are closer than the pixel error, so rank order is a safe assignment.
     remaining.sort(key=lambda pair: -pair[1])
     for marker, (model_id, _) in zip(
         sorted(anonymous, key=lambda m: m["y"]), remaining
@@ -267,7 +230,6 @@ def main(argv=None) -> None:
             )
 
     print(f"Wrote {len(rows)} models to {OUT.relative_to(REPO)}")
-
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,3 @@
-import pya0
-import re
 import tqdm
 import json
 from statistics import mean

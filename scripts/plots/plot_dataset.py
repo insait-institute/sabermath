@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-
 import argparse
-import re
-import textwrap
 from collections import defaultdict
 from collections.abc import Mapping
-from datasets import concatenate_datasets, load_dataset
+import re
+import textwrap
 
-import numpy as np
-import matplotlib.pyplot as plt
+from datasets import concatenate_datasets, load_dataset
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 USAGE = """\
   python scripts/run_analysis.py plot-dataset benchmark <hf-dataset>
@@ -1347,7 +1342,6 @@ def get_domains(ds: Dataset, idx: int) -> list[str]:
         if domain:
             domains.add(domain)
     return list(domains)
-
 
 
 def load_benchmark(name: str):

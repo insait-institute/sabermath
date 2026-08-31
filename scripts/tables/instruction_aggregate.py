@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 import argparse
 import json
 from pathlib import Path
@@ -11,16 +6,16 @@ from pathlib import Path
 from sabermath import registry as rr
 from sabermath.results import parse_result_name
 
+
 TASK_ORDER = ["statement-statement", "statement-full", "full-full"]
 
-
-def load_cells(scan: Path, protocol_tag: str, subset: str) -> dict:
+def load_cells(scan: Path, subset: str) -> dict:
     cells: dict[tuple[str, str], dict] = {}
     for path in sorted(scan.glob("*.json")):
         parsed = parse_result_name(path.stem)
         if parsed is None:
             continue
-        if parsed["protocol_tag"] != protocol_tag or parsed["subset"] != subset:
+        if parsed["subset"] != subset:
             continue
         if parsed["part"] is not None or parsed["shard"] is not None:
             continue
@@ -51,7 +46,6 @@ def load_cells(scan: Path, protocol_tag: str, subset: str) -> dict:
         }
     return cells
 
-
 def format_cell(cell: dict | None, task: str) -> str:
     if cell is None:
         return "-"
@@ -63,7 +57,6 @@ def format_cell(cell: dict | None, task: str) -> str:
         text += f" ({entry['n_done']}/{entry['n_total']})"
     return text
 
-
 def delta_cell(cell: dict | None, base: dict | None, task: str) -> str:
     if cell is None or base is None:
         return ""
@@ -74,7 +67,6 @@ def delta_cell(cell: dict | None, base: dict | None, task: str) -> str:
     if entry["n_done"] != base_entry["n_done"]:
         return " (n differs)"
     return f" ({entry['ndcg_at_k'] - base_entry['ndcg_at_k']:+.4f})"
-
 
 def build_block(models, cells, prompt_keys, tasks, with_deltas) -> list[list[str]]:
     header = ["model"]
@@ -96,7 +88,6 @@ def build_block(models, cells, prompt_keys, tasks, with_deltas) -> list[list[str
         rows.append(row)
     return rows
 
-
 def render_markdown(rows: list[list[str]]) -> str:
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     lines = []
@@ -108,17 +99,9 @@ def render_markdown(rows: list[list[str]]) -> str:
             lines.append("|" + "|".join("-" * (w + 2) for w in widths) + "|")
     return "\n".join(lines)
 
-
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan", type=Path, default=Path("results/evaluation"))
-    parser.add_argument(
-        "--protocol-tag",
-        type=str,
-        default="",
-        help="Which protocol's files to aggregate: '' (current protocol, the "
-        "default), 'legacy', 'nl1', 'nl2', 'legacy-nl1'.",
-    )
     parser.add_argument("--subset", type=str, default="")
     parser.add_argument(
         "--prompts", nargs="+", default=["p0", "p1", "p2", "p3"]
@@ -128,11 +111,10 @@ def main(argv=None) -> None:
     parser.add_argument("--json", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    cells = load_cells(args.scan, args.protocol_tag, args.subset)
+    cells = load_cells(args.scan, args.subset)
     if not cells:
         raise SystemExit(
-            f"No result files matching protocol_tag={args.protocol_tag!r} "
-            f"subset={args.subset!r} under {args.scan}"
+            f"No result files matching subset={args.subset!r} under {args.scan}"
         )
 
     models = sorted({model for model, _ in cells})
@@ -147,8 +129,7 @@ def main(argv=None) -> None:
     }
 
     out = []
-    protocol_label = args.protocol_tag or "canonical"
-    out.append(f"# Instruction ablation ({protocol_label})\n")
+    out.append("# Instruction ablation\n")
     out.append(f"Source: `{args.scan}`\n")
     out.append("\n## Instructable models\n")
     out.append(render_markdown(blocks["instructable"]))
@@ -169,7 +150,6 @@ def main(argv=None) -> None:
 
     if args.json is not None:
         payload = {
-            "protocol_tag": args.protocol_tag,
             "subset": args.subset,
             "instructable": instructable,
             "control": controls,
@@ -181,7 +161,6 @@ def main(argv=None) -> None:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(payload, indent=2))
         print(f"[+] Wrote {args.json}")
-
 
 if __name__ == "__main__":
     main()

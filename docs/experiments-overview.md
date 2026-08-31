@@ -29,7 +29,12 @@ it:
 | `scripts/config/` | `tournament.yaml` and `math_vs_word.yaml` |
 
 Nothing under `src/` is runnable: the package is import-only and has no
-`__main__` block anywhere.
+`__main__` block anywhere. Scripts `import sabermath` directly rather than
+manipulating `sys.path`, so install the package first:
+
+```bash
+python -m pip install -e .
+```
 
 ## Per-experiment write-ups
 

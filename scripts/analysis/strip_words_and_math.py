@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-import sys
+import argparse
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+import re
 
 from datasets import load_dataset
-import re
-import argparse
 import yaml
 
 from sabermath.math_vs_word.embed import get_top5_candidates
+
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 
 def main(argv=None) -> None:

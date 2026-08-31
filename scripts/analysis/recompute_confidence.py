@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-import argparse
 from collections import defaultdict
 import json
-import random
 import os
+import random
 
 from datasets import load_dataset
 import numpy as np
 import torch
 
 import sabermath
+
 
 QUERY_DATASET_PATH = "sabermath/SaberMath-queries"
 DOMAINS = [

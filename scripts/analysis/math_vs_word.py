@@ -1,34 +1,19 @@
 #!/usr/bin/env python3
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-
 import argparse
 import multiprocessing as mp
 from pathlib import Path
 
-import yaml
 from datasets import load_dataset
+import yaml
 
 from sabermath.math_vs_word.load_models import ALLOWED_MODELS
 
-# The lexical sim_* modules pull in pya0 and scikit-learn, which an
-# embedding-model or bm25 run does not need. Each is imported inside the branch
-# that needs it, so one missing optional dependency cannot take down every
-# other method.
-
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 DEFAULT_CONFIG = CONFIG_DIR / "math_vs_word.yaml"
 
-
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
-    # Resolved against this module, not the caller's cwd, so the documented
-    # bare invocation works from anywhere:
-    #   python -m sabermath.analysis.math_vs_word.calc_sims --method jaccard
     parser.add_argument("--config-file", default=str(DEFAULT_CONFIG))
     parser.add_argument("--method")
     parser.add_argument("--force-recalc", action="store_true")
@@ -91,7 +76,7 @@ def main(argv=None) -> None:
     good_candidates = load_dataset(fixed_candidates_dataset)["train"]
 
     if method in ALLOWED_MODELS:
-        from .sim_embeddings import calc_embedding_sims
+        from sabermath.math_vs_word.sim_embeddings import calc_embedding_sims
 
         calc_embedding_sims(
             method,
@@ -120,25 +105,29 @@ def main(argv=None) -> None:
         )
 
     elif method == "jaccard":
-        from .sim_jaccard import calc_jaccard_sims
+        from sabermath.math_vs_word.sim_jaccard import calc_jaccard_sims
 
         calc_jaccard_sims(good_targets, good_candidates)
 
     elif method == "approach0":
-        from .sim_approach0 import calc_approach0_sims
+        from sabermath.math_vs_word.sim_approach0 import calc_approach0_sims
 
         calc_approach0_sims(good_targets, good_candidates)
 
     elif method == "tf-idf":
-        from .sim_tfidf import calc_tfidf_sims
+        from sabermath.math_vs_word.sim_tfidf import calc_tfidf_sims
 
         calc_tfidf_sims(good_targets, good_candidates)
 
     elif method == "bm25":
-        from .sim_bm25 import calc_bm25_sims
+        from sabermath.math_vs_word.sim_bm25 import calc_bm25_sims
 
         calc_bm25_sims(good_targets, good_candidates)
 
-
 if __name__ == "__main__":
+    # "spawn", because vLLM's EngineCore spawns subprocesses: under the
+    # platform default (fork on Linux) that raises "An attempt has been made to
+    # start a new process before the current process has finished its
+    # bootstrapping phase".
+    mp.set_start_method("spawn", force=True)
     main()
