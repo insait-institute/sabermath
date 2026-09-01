@@ -48,7 +48,6 @@ You can skip the `p0` instruction, if you already have the main results, as thos
 
 ```
 results/math_vs_word/similarities/<method>[__<instruction>].json
-results/math_vs_word/similarities_baseline/<method>.json
 results/math_vs_word/plots/*.pdf
 results/math_vs_word/results_table.csv
 results/tables/RESULTS_math_vs_word.md
