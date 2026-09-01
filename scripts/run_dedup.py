@@ -189,9 +189,6 @@ def run_embedding(model_key, args, corpus_texts, rephrased_texts, query_texts, q
         )
 
     scores_kwargs, _ = rr.prompt_scores_kwargs(model_key, None)
-    # Corpora are encoded up front rather than through get_scores, so the
-    # per-side envelope has to be applied here - the affix keys are get_scores
-    # parameters and would raise inside encode().
     affixes, encode_kwargs = split_affix_kwargs(scores_kwargs)
     encode_kwargs.pop("batch_size", None)
 
@@ -575,7 +572,6 @@ def main() -> None:
     add_merge_arguments(parser, "results/dedup")
     args = parser.parse_args()
 
-    # Before load_data(): merging is pure JSON arithmetic over finished runs.
     if args.merge_shards is not None:
         run_merge(args, merge_dedup_shards, Path(args.save_to))
         return
@@ -603,9 +599,6 @@ def main() -> None:
     if args.n is not None:
         rng = random.Random(args.seed)
         query_idxs = sorted(rng.sample(query_idxs, min(args.n, len(query_idxs))))
-    # Strided, not contiguous - the same split run_experiments uses (see
-    # sabermath.runner.select_shard), so every shard sees a mix of domains
-    # and difficulties rather than one block of the query list.
     args.shard_tag = ""
     if args.query_shards is not None:
         query_idxs = [
