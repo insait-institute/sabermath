@@ -20,23 +20,13 @@ def main(argv=None) -> None:
     parser.add_argument(
         "--instruction",
         default=None,
-        help="Instruction to run (p0/p1/p2/p3/pm). Omit for the "
-        "default instruction, which is p0 - no instruction TEXT, but still the "
-        "model's full vendor input envelope, exactly as run_dedup.py runs it. "
-        "An instructed instruction writes similarities/<method>__<instruction>.json so it "
-        "never overwrites the default file. Embedding methods only.",
+        help="Instruction to run (p0/p1/p2/p3/pm).",
     )
     parser.add_argument(
         "--query-shards",
         type=int,
         default=None,
-        help="Split the targets into N STRIDED shards (i %% N == shard), the "
-        "same split run_experiments.py's --query-shards uses. Each shard writes "
-        "similarities/<method>[__<instruction>]__shard<i>of<N>.json and never touches "
-        "another shard's file, so shards run concurrently - necessary here "
-        "because sim_embeddings rewrites its whole dict after every target "
-        "and two writers on one path clobber each other. Stitch them with "
-        "merge_sim_parts.py. Embedding methods only.",
+        help="Split the targets into N STRIDED shards (i %% N == shard)",
     )
     parser.add_argument(
         "--query-shard",
@@ -55,9 +45,7 @@ def main(argv=None) -> None:
         )
     if args.query_shards is not None and args.force_recalc:
         parser.error(
-            "--force_recalc with --query-shards would restart the shard from "
-            "target 0; shards resume from their own file by design. Delete the "
-            "shard file instead if you really mean to redo it."
+            "--force_recalc with --query-shards would restart the shard"
         )
 
     config_file_path = args.config_file
@@ -99,9 +87,7 @@ def main(argv=None) -> None:
         raise SystemExit(
             f"{flag} is not supported for {method}: jaccard/tf-idf/"
             "approach0/bm25 have no instruction mechanism and no vendor input "
-            "envelope to strip. They are the CONTROL rows of the main "
-            "ablation for exactly this reason "
-            "(sabermath.registry.INSTRUCTION_CONTROL_REASONS)."
+            "envelope to strip."
         )
 
     elif method == "jaccard":

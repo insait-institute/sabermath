@@ -39,37 +39,6 @@ VENDOR_QWEN3_RERANKER_INSTRUCTION = (
     "Given a web search query, retrieve relevant passages that answer the query"
 )
 
-INSTRUCTION_CONTROL_REASONS = {
-    "bge-m3": "vendor removed instruction prompting by design",
-    "bert-base-uncased": "no instruction mechanism (plain MLM encoder)",
-    "roberta-base": "no instruction mechanism (plain MLM encoder)",
-    "splade-code-0.6b": "prompts {}; prompt_type picks a top-k budget, not text",
-    "splade-code-8b": "prompts {}; prompt_type picks a top-k budget, not text",
-    "bm25": "lexical, no instruction mechanism",
-    "tf-idf": "lexical, no instruction mechanism",
-    "jaccard": "lexical, no instruction mechanism",
-    "bm25-no-tok": "lexical, no instruction mechanism",
-    "tf-idf-no-tok": "lexical, no instruction mechanism",
-    "jaccard-no-tok": "lexical, no instruction mechanism",
-    "approach0": "structure search engine, no instruction mechanism",
-    "embeddinggemma-300m": "fixed closed-set prompt grammar, free text is not the mechanism",
-    "multilingual-e5-large": "fixed query:/passage: prefixes, free text is not the mechanism",
-    "jina-embeddings-v5-text-nano": "fixed Query:/Document: prefixes + LoRA task adapter",
-    "jina-embeddings-v5-text-small": "fixed Query:/Document: prefixes + LoRA task adapter",
-    "gemini-embedding-001": "task_type enum API parameter, no free text",
-    "gemini-embedding-2": "task_type enum API parameter, no free text",
-    "text-embedding-3-small": "API exposes no instruction parameter at all",
-    "text-embedding-3-large": "API exposes no instruction parameter at all",
-    "gte-moderncolbert": "[Q]/[D] markers only, no task slot",
-    "reason-moderncolbert": "[Q]/[D] markers only, no task slot",
-    "rank1-0.5b": "no instruction slot; the vendor route is rewriting the query",
-    "rank1-7b": "no instruction slot; the vendor route is rewriting the query",
-    "rank1-32b": "no instruction slot; the vendor route is rewriting the query",
-    "rank1-32b-bf16": "no instruction slot; the vendor route is rewriting the query",
-    "diver-grouprank-32b": "fixed rubric template, no task slot",
-    "rader-reranker-7b": "T10 query:/Query:/document: template, no instruction slot",
-}
-INSTRUCTION_CONTROL_MODELS = frozenset(INSTRUCTION_CONTROL_REASONS)
 
 REASONIR_QUERY_INSTRUCTION_SLOT = "<|user|>\n{instruction}\n<|embed|>\n"
 
@@ -396,46 +365,6 @@ COLBERT_REPOS = {
 }
 
 
-INSTRUCTION_EXCLUDED = {
-    "reasonir-8b-vllm": (
-        "vLLM cannot express ReasonIR's instruction mechanism - its encode() "
-        "masks the instruction positions out of the POOLING mask, not out of "
-        "the text, and a stock MEAN pooler has no way to represent that. Use "
-        "the reasonir-8b key (ReasonIRProcessor) for p1/p2/p3; this key "
-        "exists only to run p0 on vLLM"
-    ),
-    "bm25": (
-        "dropped from the instruction experiment. BM25 has no "
-        "instruction mechanism - the prompt can only be prepended to the "
-        "query as more query terms - and unlike its two lexical siblings it "
-        "has no pathology that makes the result uninterpretable, so it ran "
-        "and scored 0.4165 -> 0.3568/0.3630/0.3881 on statement-full. "
-        "Reporting one lexical baseline with instructions and two without is a "
-        "harness accident, not a distinction, so all three are now excluded "
-        "together and the runs were deleted"
-    ),
-    "bm25-no-tok": ("same reason as bm25"),
-    "tf-idf-no-tok": (
-        "same reason as tf-idf: a document-fitted vocabulary plus cosine "
-        "dilution makes instruction words pure noise"
-    ),
-    "jaccard-no-tok": (
-        "same reason as jaccard: instruction tokens inflate the query "
-        "token-set union"
-    ),
-    "tf-idf": (
-        "its vocabulary is fitted on documents only and cosine scoring "
-        "dilutes real query terms, so instruction words act as pure noise"
-    ),
-    "jaccard": (
-        "instruction tokens inflate the query token-set union, distorting "
-        "every score monotonically"
-    ),
-    "approach0": (
-        "its _BROKEN_QUERIES md5 skip-list matches raw query text, so any "
-        "query rewrite reintroduces known segfaults"
-    ),
-}
 
 ALL_MODEL_KEYS = (
     PIPELINE_MODEL_KEYS
@@ -495,10 +424,6 @@ def processor_slot(model_key: str, instruction_key: str) -> str:
 
 def uses_tensor_parallel(model_key: str) -> bool:
     return model_key in GENERIC_MODELS_USE_TP or model_key in CUSTOM_MODELS_USE_TP
-
-
-def is_control_model(model_key: str) -> bool:
-    return model_key in INSTRUCTION_CONTROL_MODELS
 
 
 def build_spec_processor(spec: dict, model_key: str, tensor_parallel_size: int):

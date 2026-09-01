@@ -51,10 +51,6 @@ def _print_registry() -> None:
         print(f"\n{title} ({len(keys)}):")
         for key in keys:
             notes = []
-            if key in R.INSTRUCTION_EXCLUDED:
-                notes.append("p0 only")
-            elif R.is_control_model(key):
-                notes.append("instruction control")
             if R.uses_tensor_parallel(key):
                 notes.append("multi-GPU")
             suffix = f"   [{', '.join(notes)}]" if notes else ""
@@ -176,17 +172,6 @@ def main() -> None:
             parser.error("--query-shards must be >= 2.")
         if not 0 <= args.query_shard < args.query_shards:
             parser.error(f"--query-shard must be in [0, {args.query_shards - 1}].")
-
-    instructed = [p for p in prompts if p != "p0"]
-    if instructed:
-        for model_key in models:
-            if model_key in R.INSTRUCTION_EXCLUDED:
-                parser.error(
-                    f"{model_key} cannot run instructed prompts "
-                    f"({', '.join(instructed)}): "
-                    f"{R.INSTRUCTION_EXCLUDED[model_key]}. "
-                    "Only --prompts p0 is valid for it."
-                )
 
     ctx = mp.get_context("spawn")
     failures = []

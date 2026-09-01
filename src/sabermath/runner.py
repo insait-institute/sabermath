@@ -302,10 +302,7 @@ def run_model(
             "query_instruction_applied": query_instruction is not None,
             "protocol": "canonical",
             "instruction_template": instruction_template,
-            "mechanism": (
-                "control" if R.is_control_model(model_key) else "vendor-instruction"
-            ),
-            "control_reason": R.INSTRUCTION_CONTROL_REASONS.get(model_key),
+            "mechanism": "vendor-instruction",
             "input_envelope": {
                 k: v for k, v in scores_kwargs.items() if k in AFFIX_KEYS
             },

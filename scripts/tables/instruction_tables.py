@@ -132,8 +132,7 @@ def main(argv=None) -> None:
         raise SystemExit(f"No completed runs under {args.scan}")
 
     models = sorted({key for key, _ in cells})
-    instructable = [m for m in models if m not in rr.INSTRUCTION_CONTROL_MODELS]
-    controls = [m for m in models if m in rr.INSTRUCTION_CONTROL_MODELS]
+    instructable = models
 
     def order(keys, task):
         return sorted(
@@ -157,10 +156,7 @@ def main(argv=None) -> None:
 
     for task in args.tasks:
         body += [f"## {task}", ""]
-        body += ["### Instructable models", ""]
         body += block(cells, order(instructable, task), args.prompts, task)
-        body += ["", "### Controls (no vendor instruction mechanism)", ""]
-        body += block(cells, order(controls, task), args.prompts, task)
         body += [""]
 
     main_task = "statement-full"
@@ -185,15 +181,6 @@ def main(argv=None) -> None:
     body += summary_block(cells, cat_groups, args.prompts, main_task, "Category")
     body += [""]
 
-    if controls:
-        body += summary_block(
-            cells,
-            [("ALL control", controls)],
-            args.prompts,
-            main_task,
-            "Control",
-        )
-        body += [""]
 
     # ---- summary: per domain ----
     body += [
@@ -238,13 +225,8 @@ def main(argv=None) -> None:
     for domain in DOMAINS:
         slot = (main_task, domain)
         body += [f"### {domain.title()}", ""]
-        body += ["**Instructable**", ""]
         body += block(cells, order(instructable, main_task), args.prompts, slot)
         body += [""]
-        if controls:
-            body += ["**Control**", ""]
-            body += block(cells, order(controls, main_task), args.prompts, slot)
-            body += [""]
 
     # ---- pm instruction, where it exists ----
     pm_models = sorted({k for (k, prompt) in cells if prompt == "pm"})
@@ -278,18 +260,11 @@ def main(argv=None) -> None:
             body.append(f"- `{key}`")
         body.append("")
 
-    body += ["## Why the controls are separate", ""]
-    for key in controls:
-        reason = rr.INSTRUCTION_CONTROL_REASONS.get(key, "")
-        name = MODEL_INFO.get(key, (key, ""))[0]
-        body.append(f"- **{name}** — {reason}")
-    body.append("")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text("\n".join(body))
     print(
-        f"[+] {len(models)} models ({len(instructable)} instructable, "
-        f"{len(controls)} control) -> {args.out}"
+        f"[+] {len(models)} models -> {args.out}"
     )
 
 if __name__ == "__main__":

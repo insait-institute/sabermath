@@ -17,7 +17,11 @@ dependencies = [
     "datasets>=4.8.5",
     "pyyaml>=6.0",
     "loguru>=0.7",
-    "requests>=2.31"
+    "requests>=2.31",
+    # Backs the shared math tokenizer in processors/tokenization_helper.py,
+    # which TF-IDF, BM25 and Jaccard all import - not just Approach Zero.
+    # Linux-only wheel, so the marker keeps a plain install working elsewhere.
+    "pya0==0.3.7; platform_system == 'Linux'"
 ]
 
 [project.optional-dependencies]
@@ -52,8 +56,7 @@ analysis = [
 lexical = [
     "scikit-learn>=1.7,<1.8; python_version < '3.11'",
     "scikit-learn>=1.7; python_version >= '3.11'",
-    "rank-bm25>=0.2.2",
-    "pya0==0.3.7; platform_system == 'Linux'"
+    "rank-bm25>=0.2.2"
 ]
 
 rerankers = [

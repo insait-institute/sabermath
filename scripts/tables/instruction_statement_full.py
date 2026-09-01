@@ -66,12 +66,6 @@ TABLE = [
     ("RoBERTa", "roberta-base", "B"),
 ]
 
-EXCLUDED = {
-    "approach0": "its segfault skip-list matches an MD5 of the raw query text, which any rewrite defeats",
-    "bm25": "no instruction mechanism; the instructions it did have were dropped so the lexical rows are treated alike",
-    "jaccard": "instruction tokens inflate the query token-set union, moving every score monotonically",
-    "tf-idf": "its vocabulary is fitted on documents only and cosine dilutes real query terms",
-}
 
 
 def collect(runs_dir: Path):
@@ -172,11 +166,6 @@ def markdown(cells, rejected, ordered):
                 best, best_name = got[0], instruction
         md.append(f"| {name} | {code} | " + " | ".join(cells_txt) + f" | {best_name} |")
 
-    md += ["", "## Rows with no instructions", ""]
-    for key, why in sorted(EXCLUDED.items()):
-        name = next(n for n, k, _ in TABLE if k == key)
-        md.append(f"- **{name}** - {why}.")
-
     if rejected:
         md += ["", "## Incomplete or unverifiable runs (excluded from the table)", ""]
         for key, instruction, why, source in sorted(rejected):
@@ -205,8 +194,7 @@ def latex(ordered):
         "    \\caption{Effect of a task instruction on \\bench{} (statement-full), "
         "nDCG@10 over all 1000 queries. \\texttt{p0} is the no-instruction "
         "baseline and \\texttt{p1}--\\texttt{p3} prepend one prompt to the query; "
-        "``--'' marks a model with no run for that instruction. The four lexical and "
-        "symbolic rows have no instruction mechanism and are reported without instructions.}",
+        "``--'' marks a model with no run for that instruction.}",
         "    \\label{tab:instructions-statement-full}",
         "    \\renewcommand{\\arraystretch}{1.05}",
         "    \\setlength{\\tabcolsep}{4pt}",

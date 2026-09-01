@@ -118,14 +118,12 @@ def main(argv=None) -> None:
         )
 
     models = sorted({model for model, _ in cells})
-    instructable = [m for m in models if m not in rr.INSTRUCTION_CONTROL_MODELS]
-    controls = [m for m in models if m in rr.INSTRUCTION_CONTROL_MODELS]
+    instructable = models
 
     blocks = {
         "instructable": build_block(
             instructable, cells, args.prompts, args.tasks, True
         ),
-        "control": build_block(controls, cells, args.prompts, args.tasks, True),
     }
 
     out = []
@@ -133,12 +131,6 @@ def main(argv=None) -> None:
     out.append(f"Source: `{args.scan}`\n")
     out.append("\n## Instructable models\n")
     out.append(render_markdown(blocks["instructable"]))
-    out.append("\n\n## Controls (no vendor instruction mechanism)\n")
-    out.append(render_markdown(blocks["control"]))
-    out.append("\n\nControl reasons:\n")
-    for model_key in controls:
-        reason = rr.INSTRUCTION_CONTROL_REASONS.get(model_key, "")
-        out.append(f"- `{model_key}` - {reason}\n")
     text = "".join(out)
 
     print(text)
@@ -152,7 +144,6 @@ def main(argv=None) -> None:
         payload = {
             "subset": args.subset,
             "instructable": instructable,
-            "control": controls,
             "cells": {
                 f"{model}__{key}": cell["tasks"]
                 for (model, key), cell in sorted(cells.items())
