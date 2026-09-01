@@ -6,6 +6,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from sabermath.registry import RADER_BIENCODER_MODELS 
 from sabermath.processors import SentenceTransformersProcessor
 from . import SIMILARITIES_DIR
+from .models import ALLOWED_MODELS
 
 _NO_EXPERIMENT_KEY = {"microsoft/codebert-base"}
 _TENSOR_PARALLEL_SIZE = 1
@@ -131,58 +132,7 @@ def get_model(
         model_key, key, _TENSOR_PARALLEL_SIZE, _SAVE_DIR
     )
 
-ALLOWED_MODELS = [
-    "Qwen/Qwen3-Embedding-8B",
-    "Qwen/Qwen3-Embedding-4B",
-    "Qwen/Qwen3-Embedding-0.6B",
-    "BAAI/bge-m3",
-    "tencent/KaLM-Embedding-Gemma3-12B-2511",
-    "google/embeddinggemma-300m",
-    "google-bert/bert-base-uncased",  
-    "FacebookAI/roberta-base",  
-    "microsoft/codebert-base",
-    "google/gemini-embedding-001",
-    "google/gemini-embedding-2",
-    "microsoft/harrier-oss-v1-0.6b",
-    "microsoft/harrier-oss-v1-270m",
-    "microsoft/harrier-oss-v1-27b",
-    "Octen/Octen-Embedding-4B",
-    "Octen/Octen-Embedding-8B",
-    "jinaai/jina-embeddings-v5-text-nano",
-]
 
-ADDITIONAL_MODELS = [
-    "hanhainebula/reason-embed-qwen3-8b-0928",
-    "AQ-MedAI/Diver-Retriever-4B",
-    "AQ-MedAI/Diver-Retriever-0.6B",
-    "infly/inf-retriever-v1-pro",
-    "reasonir/ReasonIR-8B", 
-    RADER_BIENCODER_MODELS["rader-14b"],
-    RADER_BIENCODER_MODELS["rader-7b"],
-    RADER_BIENCODER_MODELS["rader-3b"],
-    "nvidia/llama-embed-nemotron-8b",
-    "intfloat/multilingual-e5-large",
-    "jinaai/jina-embeddings-v5-text-small",
-    "text-embedding-3-large",
-    "text-embedding-3-small",
-    "jhu-clsp/rank1-32b",
-    "jhu-clsp/rank1-7b", 
-    "jhu-clsp/rank1-0.5b",  
-    "qwen3-reranker-8b",
-    "qwen3-reranker-4b",
-    "qwen3-reranker-0.6b",
-    "splade-code-8b",
-    "splade-code-0.6b",
-    "rader-reranker-7b", 
-    "diver-grouprank-32b",  
-    "lightonai/GTE-ModernColBERT-v1", 
-    "lightonai/Reason-ModernColBERT", 
-    "inf-x-retriever",
-    "retro-star-32b", 
-    "retro-star-32b-rewritten",
-    "reason-rewriter-reason-embed-8b",
-    "reason-rewriter-reason-embed-llama-3.1-8b", 
-    "hanhainebula/reason-embed-llama-3.1-8b-0928", 
-]
-
-ALLOWED_MODELS = ALLOWED_MODELS + ADDITIONAL_MODELS
+assert set(RADER_BIENCODER_MODELS.values()) <= set(ALLOWED_MODELS), (
+    "RADER_BIENCODER_MODELS and math_vs_word.models.ALLOWED_MODELS disagree"
+)

@@ -30,13 +30,12 @@ from sabermath.math_vs_word import SIMILARITIES_DIR
 from sabermath.math_vs_word.aggregate import (
     INSTRUCTIONS,
     DOMAIN_ORDER,
-    NON_EMBEDDING_METHODS,
     aggregate_math_vs_words,
     instructions_on_disk,
     build_id_to_domain,
     load_similarity_content,
 )
-from sabermath.math_vs_word.roster import all_methods
+from sabermath.math_vs_word.models import NON_EMBEDDING_METHODS, all_methods
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 DEFAULT_CONFIG = CONFIG_DIR / "math_vs_word.yaml"

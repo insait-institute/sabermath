@@ -4,13 +4,8 @@ import json
 from pathlib import Path
 
 from sabermath.math_vs_word import SIMILARITIES_DIR
-from sabermath.math_vs_word.aggregate import NON_EMBEDDING_METHODS
 from sabermath.math_vs_word.load_models import get_scores_kwargs
-from sabermath.math_vs_word.roster import (
-    LOAD_MODELS_PY,
-    REGISTRY_PY,
-    allowed_models,
-)
+from sabermath.math_vs_word.models import ALLOWED_MODELS, NON_EMBEDDING_METHODS
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
@@ -55,14 +50,6 @@ def inspect(method: str, sim_dir: Path, instruction: str | None = None) -> tuple
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sim-dir", type=Path, default=SIMILARITIES_DIR)
-    parser.add_argument("--load-models", type=Path, default=LOAD_MODELS_PY)
-    parser.add_argument(
-        "--extra-source",
-        type=Path,
-        nargs="*",
-        default=[REGISTRY_PY],
-        help="Modules whose top-level literals load_models.py imports.",
-    )
     parser.add_argument(
         "--emit-commands",
         action="store_true",
@@ -78,7 +65,7 @@ def main(argv=None) -> None:
     )
     args = parser.parse_args(argv)
 
-    methods = allowed_models(args.load_models, args.extra_source) + NON_EMBEDDING_METHODS
+    methods = list(ALLOWED_MODELS) + NON_EMBEDDING_METHODS
     results = [(m, *inspect(m, args.sim_dir)) for m in methods]
 
     complete = [r for r in results if r[1] == "ok"]

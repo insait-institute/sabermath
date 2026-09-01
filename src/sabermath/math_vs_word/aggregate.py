@@ -26,7 +26,6 @@ TEXT_KEY = "pr_text_vs_candidates"
 INSTRUCTIONS = ["p0", "p1", "p2", "p3"]
 BASELINE_INSTRUCTION = "p0"
 
-NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
 
 MODELS_WITH_EXPECTED_TIES = {
     "jaccard",
