@@ -95,9 +95,9 @@ def assert_envelope_supported(model_id: str, processor, scores_kwargs: dict) -> 
     if model_id in _NO_EXPERIMENT_KEY:
         return
 
-    from sabermath import registry as rr
+    from sabermath.runner import assert_envelope_supported as _check
 
-    rr._assert_envelope_supported(model_key_for(model_id), processor, scores_kwargs)
+    _check(model_key_for(model_id), processor, scores_kwargs)
 
 
 def get_model(
