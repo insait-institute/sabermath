@@ -18,6 +18,9 @@ from tqdm import tqdm
 import yaml
 
 from sabermath.llm_api import APIQuery
+
+REPO = Path(__file__).resolve().parents[2]
+OUT_DIR = REPO / "results" / "construction"
 from sabermath.llm_executor import QueryExecutor
 from sabermath.llm_postprocess import fix_thinking
 
@@ -629,8 +632,9 @@ def main(argv=None) -> None:
 
     parser.add_argument(
         "--output-json",
-        required=True,
-        help="Where to save average inversion results.",
+        default=str(OUT_DIR / "final_results.json"),
+        help="Where to save average inversion results. "
+        "Default: results/construction/final_results.json.",
     )
 
     parser.add_argument(

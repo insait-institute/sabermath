@@ -1,14 +1,6 @@
 from loguru import logger
 import os
 from tqdm import tqdm
-from google import genai
-from google.genai import types
-from openai import OpenAI, RateLimitError
-from together import Together
-import anthropic
-from anthropic.types import ThinkingBlock, TextBlock
-from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
-from anthropic.types.messages.batch_create_params import Request
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
@@ -16,11 +8,61 @@ import requests
 import json
 
 import tempfile
-from transformers import AutoTokenizer
 import asyncio
 import threading
 import numpy as np
 from queue import Queue
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = types = None
+
+try:
+    from openai import OpenAI, RateLimitError
+except ImportError:
+    OpenAI = None
+
+    class RateLimitError(Exception):
+        """Never raised; keeps the isinstance() checks below well-formed."""
+
+try:
+    from together import Together
+except ImportError:
+    Together = None
+
+try:
+    import anthropic
+    from anthropic.types import ThinkingBlock, TextBlock
+    from anthropic.types.message_create_params import (
+        MessageCreateParamsNonStreaming,
+    )
+    from anthropic.types.messages.batch_create_params import Request
+except ImportError:
+    anthropic = MessageCreateParamsNonStreaming = Request = None
+
+    class ThinkingBlock:
+        """Never instantiated; keeps the isinstance() checks well-formed."""
+
+    class TextBlock:
+        """Never instantiated; keeps the isinstance() checks well-formed."""
+
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    AutoTokenizer = None
+
+
+def _require(obj, package: str, extra: str):
+    """Return `obj`, or explain which install provides it."""
+    if obj is None:
+        raise ImportError(
+            f"{package} is required for this backend. Install it with: "
+            f'pip install -e ".[{extra}]"'
+        )
+    return obj
+
 
 try:
     from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -161,7 +203,9 @@ class APIQuery:
                     "vllm is not installed. Please run `pip install vllm`."
                 )
 
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model)
+            self.tokenizer = _require(
+                AutoTokenizer, "transformers", "rerankers"
+            ).from_pretrained(self.model)
             vllm_args = {}
             for p in ("temperature", "top_p", "max_tokens", "logprobs"):
                 if p in self.kwargs:
@@ -181,7 +225,9 @@ class APIQuery:
         elif self.api == "vllm":
             if LLM is None:
                 raise ImportError("vllm is not installed. pip install vllm")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model)
+            self.tokenizer = _require(
+                AutoTokenizer, "transformers", "rerankers"
+            ).from_pretrained(self.model)
             vllm_args = {}
 
             for p in ("temperature", "top_p", "max_tokens", "logprobs"):
@@ -635,7 +681,7 @@ class APIQuery:
             ]
 
         text_queries = [query[0] for query in queries]
-        client = anthropic.Anthropic(
+        client = _require(anthropic, "anthropic", "apis").Anthropic(
             api_key=self.api_key,
             max_retries=0,
         )
@@ -729,12 +775,12 @@ class APIQuery:
 
     def anthropic_query(self, query):
         query, image_path = query
-        client = anthropic.Anthropic(
+        client = _require(anthropic, "anthropic", "apis").Anthropic(
             api_key=self.api_key,
             max_retries=0,
             timeout=self.timeout,
         )
-        system_message = anthropic.NOT_GIVEN
+        system_message = _require(anthropic, "anthropic", "apis").NOT_GIVEN
         if query[0]["role"] == "system":
             system_message = query[0]["content"]
             query = query[1:]
@@ -786,7 +832,7 @@ class APIQuery:
         }
 
     def google_query(self, query):
-        client = genai.Client(
+        client = _require(genai, "google-genai", "apis").Client(
             api_key=self.api_key, http_options={"api_version": "v1alpha"}
         )
         query, image_path = query
@@ -856,7 +902,9 @@ class APIQuery:
             ]
         query_chunks = self._create_jsonl_chunks(queries)
         batch_jobs = []
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
+        client = _require(OpenAI, "openai", "apis")(
+            api_key=self.api_key, base_url=self.base_url, max_retries=0
+        )
 
         for chunk in query_chunks:
             jsonl_queries_with_indices = chunk
@@ -1272,9 +1320,9 @@ class APIQuery:
 
     def openai_query_with_tools(self, query, is_together=False, allow_tools=True):
         if is_together:
-            client = Together()
+            client = _require(Together, "together", "apis")()
         else:
-            client = OpenAI(
+            client = _require(OpenAI, "openai", "apis")(
                 api_key=self.api_key,
                 base_url=self.base_url,
                 timeout=self.timeout,
@@ -1293,7 +1341,9 @@ class APIQuery:
 
     def retrieve_batch(self, queries, batch_id):
 
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
+        client = _require(OpenAI, "openai", "apis")(
+            api_key=self.api_key, base_url=self.base_url, max_retries=0
+        )
 
         while True:
             try:

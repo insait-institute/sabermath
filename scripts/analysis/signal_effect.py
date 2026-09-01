@@ -10,6 +10,8 @@ import yaml
 
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+REPO = Path(__file__).resolve().parents[2]
+OUT_DIR = REPO / "results" / "construction"
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
@@ -154,7 +156,10 @@ def main(argv=None) -> None:
 
     plt.tight_layout()
 
-    plt.savefig(f"signal_{tag}_cumulative_proportions.pdf", dpi=300, bbox_inches="tight")
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = OUT_DIR / f"signal_{tag}_cumulative_proportions.pdf"
+    plt.savefig(out_file, dpi=300, bbox_inches="tight")
+    print(f"[+] wrote {out_file}")
 
 if __name__ == "__main__":
     main()

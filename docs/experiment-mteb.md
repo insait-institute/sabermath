@@ -4,7 +4,7 @@ Correlates each model's SABER-Math Overall score against its MTEB Retrieval scor
 
 ## Prerequisites
 
-- `python -m pip install -e .` (needs `pandas` and `scipy`).
+- `python -m pip install -e ".[analysis]"` — for `pandas` and `scipy`.
 - Runs in `results/evaluation/`. Point elsewhere with `--results-dir`.
 - The MTEB leaderboard export, checked in at `results/mteb/leaderboard.csv`. Pass `--mteb-file` to correlate against a different one. Required columns:
 

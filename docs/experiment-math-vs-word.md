@@ -4,7 +4,7 @@ For each target, compares how similar its **full statement**, its **equation-onl
 
 ## Prerequisites
 
-- `python -m pip install -e .` and the environment that model family needs (see [experiment-evaluation.md](experiment-evaluation.md)).
+- `python -m pip install -e ".[analysis]"` and the environment that model family needs (see [experiment-evaluation.md](experiment-evaluation.md)). Step 4 needs `[analysis]` for the figure.
 - `scripts/config/math_vs_word.yaml` names the input and output Hugging Face datasets. Every step takes `--config-file` to point at a different one.
 - `HF_TOKEN` with write access.
 - API keys for the closed models: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for `gemini-embedding-*`, `OPENROUTER_API_KEY` for `text-embedding-3-*`.

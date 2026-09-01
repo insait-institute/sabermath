@@ -1,10 +1,10 @@
 # Dataset composition charts
 
-Sunburst charts of how the benchmark and its source corpus distribute across mathematical domains and subdomains.
+Pie charts of how the benchmark and its source corpus distribute across mathematical domains and subdomains.
 
 ## Prerequisites
 
-- `python -m pip install -e .` (needs `matplotlib`).
+- `python -m pip install -e ".[analysis]"` — for `matplotlib`.
 - The Hugging Face dataset name, passed on the command line. The databank arm expects `numeric` and `proofs` splits and derives each problem's domains from its ontology tags; the benchmark arm reads the domains the dataset already carries.
 
 ## Usage
@@ -23,12 +23,12 @@ python scripts/plots/plot_candidates.py \
     --targ-idx <index>
 ```
 
-`plot_dataset.py` takes `--out-file` to override the destination; `plot_candidates.py` takes `--top-k` (default 10) for how many of the most relevant candidates to mark.
+Every chart is written to `results/composition/`. `plot_dataset.py` takes `--out-file` to override the destination; `plot_candidates.py` takes `--top-k` (default 10) for how many of the most relevant candidates to mark.
 
 ## Output
 
 | Command | Default file |
 |---|---|
-| `plot_dataset.py benchmark` | `piechart_benchmark.pdf` |
-| `plot_dataset.py databank` | `piechart_databank.pdf` |
-| `plot_candidates.py` | `piechart_candidates.pdf`, for the given target index |
+| `plot_dataset.py benchmark` | `results/composition/piechart_benchmark.pdf` |
+| `plot_dataset.py databank` | `results/composition/piechart_databank.pdf` |
+| `plot_candidates.py` | `results/composition/piechart_candidates.pdf`, for the given target index |

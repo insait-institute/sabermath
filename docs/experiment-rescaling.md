@@ -29,5 +29,6 @@ python scripts/report_experiments.py rescaling      # the LaTeX table
 
 ```
 results/rescaled/summary.json
+results/rescaling/results.json
 results/tables/rescaling_table.tex
 ```

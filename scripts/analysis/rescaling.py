@@ -351,7 +351,8 @@ def main(argv=None) -> None:
     if args.latex:
         latex_table(names, scores, args.latex)
 
-    out = Path(__file__).parent / "results.json"
+    out = REPO_ROOT / "results" / "rescaling" / "results.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(
         {"task": TASK, "n_models": len(names), "missing": sorted(missing),
          "models": names, "table": [p[2] for p in prov], "scores": scores,

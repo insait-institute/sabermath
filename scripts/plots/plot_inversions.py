@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import json
+from pathlib import Path
 import re
 
 import matplotlib.pyplot as plt
+
+REPO = Path(__file__).resolve().parents[2]
+OUT_DIR = REPO / "results" / "construction"
 
 
 def main(argv=None) -> None:
@@ -47,7 +51,10 @@ def main(argv=None) -> None:
     ax.set_facecolor("#f7f7f7")
 
     plt.tight_layout()
-    plt.savefig("average_inversions_plot.pdf", dpi=300)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = OUT_DIR / "average_inversions_plot.pdf"
+    plt.savefig(out_file, dpi=300)
+    print(f"[+] wrote {out_file}")
     plt.show()
 
 

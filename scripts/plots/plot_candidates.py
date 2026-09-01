@@ -5,6 +5,7 @@ import argparse
 from collections import defaultdict
 from collections.abc import Mapping
 import math
+from pathlib import Path
 import re
 import textwrap
 
@@ -1044,10 +1045,19 @@ def add_domain_legend_axis(
     )
 
 
-def plot_math_dataset_sunburst(
+REPO = Path(__file__).resolve().parents[2]
+OUT_DIR = REPO / "results" / "composition"
+
+
+def _out_file() -> Path:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    return OUT_DIR / "piechart_candidates.pdf"
+
+
+def plot_domain_piechart(
     ds,
     split: str | None = None,
-    out_file: str = "math_dataset_sunburst.pdf",
+    out_file: str = "piechart.pdf",
     title: str | None = None,
     query_label_keys: set[tuple[str, str]] | None = None,
     top_relevant_marker_counts: dict[tuple[str, str], int] | None = None,
@@ -1144,7 +1154,7 @@ def plot_math_dataset_sunburst(
     legend_rows = math.ceil(len(legend_domains_ordered) / 2)
 
     # Dynamic layout:
-    # - row 0: sunburst chart
+    # - row 0: pie chart
     # - middle rows: topic legends
     # - final row: domain legend
     height_ratios = [7.2] + [1.90] * legend_rows + [1.10]
@@ -1363,9 +1373,9 @@ def main(argv=None) -> None:
         top_relevant_examples,
     )
 
-    plot_math_dataset_sunburst(
+    plot_domain_piechart(
         list_of_candidates,
-        out_file="piechart_candidates.pdf",
+        out_file=str(_out_file()),
         title=None,
         query_label_keys=query_label_keys,
         top_relevant_marker_counts=top_relevant_marker_counts,

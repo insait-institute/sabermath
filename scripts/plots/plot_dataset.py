@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from collections.abc import Mapping
+from pathlib import Path
 import re
 import textwrap
 
@@ -522,10 +523,10 @@ def add_outer_labels(
             )
 
 
-def plot_math_dataset_sunburst(
+def plot_domain_piechart(
     ds,
     split: str | None = None,
-    out_file: str = "math_dataset_sunburst.pdf",
+    out_file: str = "piechart.pdf",
     title: str | None = None,
     max_topics_per_domain: int | None = 10,
     min_outer_label_pct: float = 0.0,
@@ -701,6 +702,9 @@ def load_databank(name: str):
     )
 
 
+REPO = Path(__file__).resolve().parents[2]
+OUT_DIR = REPO / "results" / "composition"
+
 DATASETS = {
     "benchmark": (load_benchmark, "piechart_benchmark.pdf"),
     "databank": (load_databank, "piechart_databank.pdf"),
@@ -717,9 +721,11 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
 
     load, default_out = DATASETS[args.kind]
-    plot_math_dataset_sunburst(
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = args.out_file or OUT_DIR / default_out
+    plot_domain_piechart(
         load(args.dataset),
-        out_file=args.out_file or default_out,
+        out_file=str(out_file),
         title=None,
         max_topics_per_domain={
             "Algebra": 8,

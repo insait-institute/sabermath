@@ -4,7 +4,7 @@ Plots statement-full nDCG@10 against measured per-query latency, with a Pareto f
 
 ## Prerequisites
 
-- `python -m pip install -e .` (needs `matplotlib` and `seaborn`).
+- `python -m pip install -e ".[analysis]"` — for `matplotlib` and `seaborn`.
 - Runs in `results/evaluation/` for the nDCG axis, read through `sabermath.tables.collect`/`build_rows`.
 - Runs in `results/timing/` for the latency axis — see [experiment-timing.md](experiment-timing.md).
 
