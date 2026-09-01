@@ -11,7 +11,6 @@ import numpy as np
 QUERIES = "INSAIT-Institute/SaberMath-queries"
 TASK = "statement-full"
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_ROOTS = [REPO_ROOT]
 SHARD_RE = re.compile(r"__shard\d+of\d+")
 
 VARIANTS = [("[0,5] + exponential gain", "exponent", 1.0),
@@ -85,16 +84,15 @@ TARGET = {k: t for _, k, t in TABLE}
 
 def collect_from_checkpoints(rel):
     groups = defaultdict(list)
-    for repo in SCAN_ROOTS:
-        for mp in repo.glob("results/*/.checkpoints/*/*/meta.json"):
-            run = mp.parent
-            if not (run / f"{TASK}.scores.json").exists():
-                continue
-            meta = json.loads(mp.read_text())
-            if meta["model_key"] not in KEYS:
-                continue
-            groups[(repo.name, run.parents[2].name, meta["model_key"],
-                    SHARD_RE.sub("", run.name))].append((run, meta))
+    for mp in REPO_ROOT.glob("results/*/.checkpoints/*/*/meta.json"):
+        run = mp.parent
+        if not (run / f"{TASK}.scores.json").exists():
+            continue
+        meta = json.loads(mp.read_text())
+        if meta["model_key"] not in KEYS:
+            continue
+        groups[(run.parents[2].name, meta["model_key"],
+                SHARD_RE.sub("", run.name))].append((run, meta))
 
     by_model = defaultdict(list)
     for key, members in groups.items():
@@ -109,15 +107,15 @@ def collect_from_checkpoints(rel):
                 row = idxs[pos] if idxs is not None else pos
                 per_row[row] = np.asarray(e["ranking"], dtype=int)
         if len(per_row) == 1000:
-            by_model[key[2]].append((key, per_row))
+            by_model[key[1]].append((key, per_row))
 
     chosen, missing = {}, []
     for _, mkey, tgt in TABLE:
         cands = []
         for key, per_row in by_model.get(mkey, []):
             ov = float(np.mean([ndcg(rel[r], rk) for r, rk in per_row.items()]))
-            cands.append((0 if key[3].startswith("p0") else 1, abs(ov - tgt),
-                          f"{key[0]}/{key[1]}/{key[3]}", per_row, ov))
+            cands.append((0 if key[2].startswith("p0") else 1, abs(ov - tgt),
+                          f"{key[0]}/{key[2]}", per_row, ov))
         if not cands:
             missing.append(mkey)
             continue
@@ -153,23 +151,22 @@ def load_rankings(path, rel):
 
 def verify(rel):
     worst, n_runs = 0.0, 0
-    for repo in SCAN_ROOTS:
-        for mp in repo.glob("results/*/.checkpoints/*/*/meta.json"):
-            run = mp.parent
-            sp, cp = run / f"{TASK}.scores.json", run / f"{TASK}.json"
-            if not (sp.exists() and cp.exists()):
+    for mp in REPO_ROOT.glob("results/*/.checkpoints/*/*/meta.json"):
+        run = mp.parent
+        sp, cp = run / f"{TASK}.scores.json", run / f"{TASK}.json"
+        if not (sp.exists() and cp.exists()):
+            continue
+        meta = json.loads(mp.read_text())
+        if meta["model_key"] not in KEYS:
+            continue
+        idxs = meta.get("query_row_idxs")
+        ck = json.loads(cp.read_text())
+        for pos_s, e in json.loads(sp.read_text()).items():
+            if e is None or ck.get(pos_s) is None:
                 continue
-            meta = json.loads(mp.read_text())
-            if meta["model_key"] not in KEYS:
-                continue
-            idxs = meta.get("query_row_idxs")
-            ck = json.loads(cp.read_text())
-            for pos_s, e in json.loads(sp.read_text()).items():
-                if e is None or ck.get(pos_s) is None:
-                    continue
-                row = idxs[int(pos_s)] if idxs is not None else int(pos_s)
-                worst = max(worst, abs(ndcg(rel[row], e["ranking"]) - ck[pos_s]))
-            n_runs += 1
+            row = idxs[int(pos_s)] if idxs is not None else int(pos_s)
+            worst = max(worst, abs(ndcg(rel[row], e["ranking"]) - ck[pos_s]))
+        n_runs += 1
     print(f"[verify] {n_runs} runs replayed, max |d nDCG| vs the stored "
           f"per-query value = {worst:.3e}")
     assert worst < 1e-9, "replay does not reproduce the published metric"
