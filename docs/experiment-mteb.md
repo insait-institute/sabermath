@@ -6,7 +6,7 @@ Correlates each model's SABER-Math Overall score against its MTEB Retrieval scor
 
 - `python -m pip install -e .` (needs `pandas` and `scipy`).
 - Runs in `results/evaluation/`. Point elsewhere with `--results-dir`.
-- An MTEB leaderboard CSV. Required columns:
+- The MTEB leaderboard export, checked in at `results/mteb/leaderboard.csv`. Pass `--mteb-file` to correlate against a different one. Required columns:
 
   | Column | Use |
   |---|---|
@@ -17,17 +17,17 @@ Correlates each model's SABER-Math Overall score against its MTEB Retrieval scor
 ## Usage
 
 ```bash
-python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv
-python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv --new-models-only
+python scripts/analysis/mteb_correlation.py --mteb-file results/mteb/leaderboard.csv
+python scripts/analysis/mteb_correlation.py --mteb-file results/mteb/leaderboard.csv --new-models-only
 ```
 
 `--new-models-only` drops the BGE, BERT, RoBERTa, E5 and `text-embedding-*` families.
 
 ```bash
-python scripts/report_experiments.py mteb --mteb-file path/to/mteb.csv
+python scripts/report_experiments.py mteb
 ```
 
-The report defaults to `results/mteb/leaderboard.csv` and is skipped with a note when that file is absent.
+`report_experiments.py` reads `results/mteb/leaderboard.csv` by default and is skipped with a note when that file is absent; `--mteb-file` overrides the path.
 
 ## Output
 

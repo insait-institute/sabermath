@@ -9,9 +9,10 @@ import numpy as np
 import torch
 
 import sabermath
+from sabermath.data import TARGETS_DATASET
 
 
-QUERY_DATASET_PATH = "sabermath/SaberMath-queries"
+QUERY_DATASET_PATH = TARGETS_DATASET
 DOMAINS = [
     "Algebra",
     "Geometry",

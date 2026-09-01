@@ -50,8 +50,8 @@ export GEMINI_API_KEY=<your-gemini-api-key>
 
 The package exposes a simple Python API through `sabermath.evaluate`. By default, it loads the benchmark datasets from Hugging Face:
 
-- `sabermath/SaberMath-queries`
-- `sabermath/SaberMath-documents`
+- `INSAIT-Institute/SaberMath-queries`
+- `INSAIT-Institute/SaberMath-documents`
 
 ### Python API
 
