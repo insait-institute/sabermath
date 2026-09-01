@@ -10,7 +10,7 @@ Bootstrap confidence intervals over the per-query nDCGs a run already stored.
 ## Usage
 
 ```bash
-python scripts/report_experiments.py confidence 
+python scripts/report_experiments.py confidence
 python scripts/analysis/compute_confidence_intervals.py results/evaluation/<model>__p0.json
 ```
 

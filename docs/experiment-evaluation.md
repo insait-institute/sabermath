@@ -13,7 +13,8 @@ Scores models across the three tasks and writes one JSON run per (model, prompt)
   | `splade-code-*` | `env_splade.yml` |
   | `inf-retriever-v1-pro`, `inf-x-retriever` | `env_inf_retriever.yml` |
   | `reasonir-8b` | `env_reasonir.yml` |
-- API keys for the closed models: `OPENAI_API_KEY`, `GEMINI_API_KEY`.
+
+- API keys for the closed models, read from the environment: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for `gemini-embedding-*`, `OPENROUTER_API_KEY` for `text-embedding-3-*`.
 
 ## Usage
 
@@ -22,7 +23,7 @@ python scripts/run_experiments.py --list                        # every model ke
 python scripts/run_experiments.py                               # every model, p0
 python scripts/run_experiments.py --models rank1-7b splade-code-8b
 python scripts/run_experiments.py --models rank1-32b --n 20     # 20-query smoke test
-python scripts/run_experiments.py --prompts p0 p1 p2 p3         # the four instructions
+python scripts/run_experiments.py --prompts p0 p1 p2 p3         # three instructions + baseline
 ```
 
 ### Splitting one run across jobs

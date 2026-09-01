@@ -6,6 +6,13 @@
 python -m pip install -e .
 ```
 
+## API keys
+
+| Variable | Needed for |
+|---|---|
+| `GEMINI_API_KEY`, or `GOOGLE_API_KEY` | `gemini-embedding-001`, `gemini-embedding-2` |
+| `OPENROUTER_API_KEY` | `text-embedding-3-small`, `text-embedding-3-large`, served through OpenRouter |
+| `HF_TOKEN` | writing the datasets that steps 1 and 2 of [experiment-math-vs-word.md](experiment-math-vs-word.md) produce |
 
 ## Endpoints
 
@@ -21,7 +28,7 @@ python -m pip install -e .
 | Document | Experiment |
 |---|---|
 | [experiment-evaluation.md](experiment-evaluation.md) | nDCG evaluation: environments, sharding, resuming, output naming |
-| [experiment-instructions.md](experiment-instructions.md) | The four instruction prompts |
+| [experiment-instructions.md](experiment-instructions.md) | The three instruction prompts and their baseline |
 | [experiment-dedup.md](experiment-dedup.md) | Where a rephrased copy of a query's own problem ranks |
 | [experiment-rescaling.md](experiment-rescaling.md) | Replaying rankings under a different gain or relevance scale |
 | [experiment-confidence-intervals.md](experiment-confidence-intervals.md) | Bootstrap confidence intervals |

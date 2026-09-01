@@ -6,7 +6,7 @@ Two checks on how the benchmark's relevance scores were produced.
 
 - `python -m pip install -e .` (needs `pandas`, `scikit-learn`, `matplotlib`, `seaborn`).
 - `scripts/config/tournament.yaml` names the datasets and prompt files. Pass `--config-file` to use a different one.
-- An LLM API key for the tournament simulation. Put the credentials at the repo root (in `.geminitok`, `.openroutertok`) or the matching environment variables.
+- A judge for the tournament simulation. It defaults to a local vLLM model (`openai/gpt-oss-120b`), so it needs a GPU and no API key. Point `judge_api` in the config at a hosted provider to use one instead.— `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`.
 
 ## Usage
 

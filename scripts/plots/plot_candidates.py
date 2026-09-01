@@ -1365,7 +1365,7 @@ def main(argv=None) -> None:
 
     plot_math_dataset_sunburst(
         list_of_candidates,
-        out_file=f"piechart_candidates_NT.pdf",
+        out_file="piechart_candidates.pdf",
         title=None,
         query_label_keys=query_label_keys,
         top_relevant_marker_counts=top_relevant_marker_counts,

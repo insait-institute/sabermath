@@ -23,7 +23,7 @@ python scripts/report_experiments.py rescaling      # the LaTeX table
 | `exponent:1.0` | the benchmark's own setting — the control |
 | `exponent:0.6` | the "grades in [0,3]" rescale; applied to relevances before the gain |
 | `linear:1.0` | linear gain, mathematically scale-invariant |
-| `rank` | within-query relevance ranks replace the Bradley–Terry magnitudes |
+| `rank` | within-query relevance ranks replace the Bradley-Terry magnitudes |
 
 ## Output
 

@@ -6,11 +6,12 @@ For each target, compares how similar its **full statement**, its **equation-onl
 
 - `python -m pip install -e .` and the environment that model family needs (see [experiment-evaluation.md](experiment-evaluation.md)).
 - `scripts/config/math_vs_word.yaml` names the input and output Hugging Face datasets. Every step takes `--config-file` to point at a different one.
-- Credentials as token files at the repo root: `.hftok`, `.geminitok`, `.openroutertok`. An exported `GEMINI_API_KEY` takes precedence over `.geminitok`.
-- `HF_TOKEN` set for writing on the given repository.
-- `--method`: one of the models, as given by `load_models.py`
+- `HF_TOKEN` with write access.
+- API keys for the closed models: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for `gemini-embedding-*`, `OPENROUTER_API_KEY` for `text-embedding-3-*`.
+- `--method`: one of the models, as given by `load_models.py`.
 
 ## Usage
+
 ```bash
 # 1. standardize LaTeX across targets and candidates
 python scripts/analysis/fix_latex.py

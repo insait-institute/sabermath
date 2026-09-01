@@ -31,4 +31,4 @@ python scripts/plots/plot_candidates.py \
 |---|---|
 | `plot_dataset.py benchmark` | `piechart_benchmark.pdf` |
 | `plot_dataset.py databank` | `piechart_databank.pdf` |
-| `plot_candidates.py` | `piechart_candidates_NT.pdf`, for the given target index|
+| `plot_candidates.py` | `piechart_candidates.pdf`, for the given target index |

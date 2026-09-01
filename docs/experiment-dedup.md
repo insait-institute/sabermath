@@ -6,6 +6,7 @@ Inserts an LLM-rephrased copy of each query's own problem into the corpus and re
 
 - `python -m pip install -e .` and the environment that model family needs (see [experiment-evaluation.md](experiment-evaluation.md)).
 - Access to `RAG4Math/targets-with-rephrased`, row-aligned with the queries dataset. Override with `--rephrased`.
+- API keys for the closed models, read from the environment: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for `gemini-embedding-*`, `OPENROUTER_API_KEY` for `text-embedding-3-*`.
 
 ## Usage
 
@@ -21,7 +22,7 @@ Options:
 | Flag | Effect |
 |---|---|
 | `--corpus` | `per-query-candidates`, `all-documents`, or `both` (default) |
-| `--doc-version full` | pairs the rephrased problem |
+| `--doc-version full` | pairs the rephrased problem with the original solution |
 | `--keep-self-match` | keeps each query's own original document in the corpus |
 | `--query-shards N --query-shard I` | strided split, one file per shard |
 

@@ -1,6 +1,6 @@
 # Instruction prompts
 
-Runs each model under four instructions and tabulates the change from the no-instruction baseline.
+Runs each model under the three instructions and tabulates the change from the no-instruction baseline.
 
 ## Prerequisites
 
@@ -11,6 +11,9 @@ Runs each model under four instructions and tabulates the change from the no-ins
   |---|---|
   | `p0` | baseline, if not already run |
   | `p1`, `p2`, `p3` | the three instructions |
+
+- API keys for the closed models, read from the environment: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for `gemini-embedding-*`, `OPENROUTER_API_KEY` for `text-embedding-3-*`.
+
 ## Usage
 
 ```bash
