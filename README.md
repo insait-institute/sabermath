@@ -4,11 +4,9 @@
 
 # SABER-Math
 
-SABER-Math (**S**calable **A**utomated **B**enchmark for **E**valuation of **R**etrieval in **Math**) is a benchmark for evaluating information retrieval systems on mathematics. It is designed to test whether a retriever can find solved problems that are mathematically useful for a query problem, rather than only textually similar.
+SABER-Math (**S**calable **A**utomated **B**enchmark for **R**eranking in **Math**) is a benchmark for evaluating information retrieval and reranking systems on mathematics. It is designed to test whether a retriever can find solved problems that are mathematically useful for a query problem, rather than only textually similar.
 
 The benchmark focuses on informal mathematical retrieval over high-school, olympiad, and early-undergraduate-style problems. Each query is paired with a fixed set of candidate documents, and every candidate has a fine-grained relevance score. The main evaluation setting is **statement-full**: the query contains only the problem statement, while each retrieved document contains a problem statement together with its solution.
-
-SABER-Math was built from a large problem-solution corpus using an automated pipeline. Candidate pairs are first discovered using two complementary signals: overlap in mathematical ontology topics and lexical overlap between short solution-idea summaries. Final relevance scores are then assigned with pairwise LLM judgments, aggregated with a Bradley-Terry model after a Swiss-style tournament. The released package evaluates retrievers with nDCG@10 across the full benchmark and across five mathematical domains: Algebra, Geometry, Number Theory, Combinatorics, and Calculus and Analysis.
 
 ## Installation
 
@@ -84,10 +82,7 @@ If `tasks` is omitted, all three tasks are evaluated. The returned report contai
 
 ### Command-line runner
 
-Evaluation runs through one endpoint, `scripts/run_experiments.py`. It takes
-model KEYS from the registry (`src/sabermath/registry.py`) rather than bare
-Hugging Face names, because each model carries its own processor recipe and
-vendor input protocol:
+Evaluation runs through one endpoint, `scripts/run_experiments.py`. It takes model keys from the registry (`src/sabermath/registry.py`) rather than HF ids, because each model carries its own processor recipe and vendor input protocol:
 
 ```bash
 # list every available model key
@@ -109,20 +104,11 @@ python scripts/run_experiments.py --models rank1-32b --n 20
 python scripts/run_experiments.py --prompts p0 p1 p2 p3
 ```
 
-`--models` defaults to every model in the registry and `--prompts` defaults to
-`p0` ("no instruction"), so a bare invocation is the production sweep. Results
-are written to `results/evaluation/<model>__<prompt>.json`, checkpointed after
-every query, so re-running an interrupted command resumes rather than
-restarting.
+`--models` defaults to every model in the registry and `--prompts` defaults to `p0` ("no instruction"). Results are written to `results/evaluation/<model>__<prompt>.json`, checkpointed after every query.
 
-Most models share one environment (`scripts/envs/env_vllm.yml`), but four
-families have conflicting pins, need their own, and fail loudly in the wrong
-one — see [docs/experiment-evaluation.md](docs/experiment-evaluation.md) and
-the files in `scripts/envs/`. In a single environment, run one model or one
-same-env family per invocation.
+Most models share one environment (`scripts/envs/env_vllm.yml`), but four families contain conflicts which can tank performance or make the runs crash. These families need their own configs, as described in [docs/experiment-evaluation.md](docs/experiment-evaluation.md) and the files in `scripts/envs/`. 
 
-The other endpoints follow the same shape, each with `--models` defaulting to
-all:
+The other endpoints follow the same shape, each with `--models` defaulting to all:
 
 | Endpoint | Experiment | Write-up |
 |---|---|---|
@@ -131,18 +117,13 @@ all:
 | `scripts/run_timing.py` | Per-query latency on production backends | [timing](docs/experiment-timing.md), [latency](docs/experiment-latency.md) |
 | `scripts/report_experiments.py` | Regenerates every table into `results/tables/` | [overview](docs/experiments-overview.md) |
 
-A slow model can be split across concurrent jobs with `--query-shards N
---query-shard I` and stitched back with `--merge-shards`; see
-[docs/experiment-evaluation.md](docs/experiment-evaluation.md).
+A slow model can be split across concurrent jobs with `--query-shards N --query-shard I` and stitched back with `--merge-shards`; see [docs/experiment-evaluation.md](docs/experiment-evaluation.md).
 
-## `build_benchmark/`: recreating the benchmark
+## Recreating the benchmark
 
-The `build_benchmark/` directory contains the code for recreating SABER-Math from the raw problem-solution databank. You do **not** need this directory to run the released benchmark; it is for reproducing the benchmark construction pipeline.
+The `build_benchmark/` directory contains the code for recreating SABER-Math from the raw problem-solution databank.
 
-The directory has its own `README.md` with the full step-by-step instructions. At a high level, the pipeline has two phases:
-
-1. **Select targets and candidates.** Problems are annotated with mathematical ontology tags and short solution ideas. Pairwise topic similarity and solution-summary Jaccard similarity are computed at scale, then target queries and candidate sets are selected.
-2. **Assign relevance scores.** Candidate documents are compared with an LLM judge in a Swiss-style tournament. The pairwise outcomes are converted into continuous relevance scores with a Bradley-Terry model, and the final scores are scaled to the benchmark rating range.
+The directory has its own `README.md` with the full step-by-step instructions.
 
 Important subdirectories:
 
@@ -159,9 +140,6 @@ See `build_benchmark/README.md` for the exact environment variables, commands, H
 
 ## Repository layout
 
-There is no separate `experiments/` tree. Analysis code lives with the source
-it depends on, and every result lives under one `results/` root.
-
 | Path | Contents |
 |---|---|
 | `src/sabermath/` | The benchmark package: `evaluate`, processors, metrics |
@@ -175,9 +153,6 @@ it depends on, and every result lives under one `results/` root.
 | `scripts/envs/` | The five conda environments, one per conflicting pin set |
 | `results/` | Every result (see below) |
 | `docs/` | Per-experiment write-ups and protocol notes (see [Documentation](#documentation)) |
-
-There are no job files and no submit scripts. Run an endpoint directly, in the
-environment that model family needs.
 
 ### `results/`
 
@@ -201,17 +176,7 @@ python scripts/report_experiments.py
 
 ## Documentation
 
-[`docs/experiments-overview.md`](docs/experiments-overview.md) is the index: it
-maps every experiment to its endpoint, its write-up and its output directory.
-
-| Document | What it covers |
-|---|---|
-| [experiments-overview.md](docs/experiments-overview.md) | The index — start here |
-| [experiment-evaluation.md](docs/experiment-evaluation.md) | Running an nDCG sweep: environments, sharding, resuming, output naming |
-| [build_benchmark/README.md](build_benchmark/README.md) | Recreating the benchmark from the raw corpus |
-
-The remaining `docs/experiment-*.md` files cover one experiment each. Each
-gives its prerequisites, the commands, and the output format — nothing else.
+[`docs/experiments-overview.md`](docs/experiments-overview.md) contains more thorough information on how to run the experiments and what each script entrypoingt does. The remaining `docs/experiment-*.md` files cover one experiment each, including prerequisites, the commands, and the output files.
 
 ## License
 
@@ -219,7 +184,7 @@ This project is licensed under the Creative Commons Attribution-ShareAlike 4.0 I
 
 You are free to share and adapt the material, provided that appropriate credit is given and any derivative works are distributed under the same license.
 
-## Citation 
+## Citation
 
 ```bibtex
 @inproceedings{
