@@ -1,69 +1,55 @@
 # SABER-Math documentation index
 
-Everything in this repo is run from four endpoints in `scripts/`. There is no
-separate `experiments/` tree: analysis code lives in the package next to the
-source it depends on, and every result lives under one `results/` root.
-
-## The endpoints
-
-| Endpoint | What it produces | Written to |
-|---|---|---|
-| `scripts/run_experiments.py` | nDCG evaluation — the main tables and the instruction arms | `results/evaluation/` |
-| `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | `results/dedup/` |
-| `scripts/run_timing.py` | Per-query latency on production backends | `results/timing/` |
-| `scripts/report_experiments.py` | Every table, regenerated from the above | `results/tables/` |
-
-The three run endpoints take `--models`, defaulting to every model in the
-registry, and each `--help` is the authoritative reference for its own flags.
-There are no launchers and no job files: run a script directly, in the right
-environment.
-
-Every analysis and figure is its own script, and each one's `--help` documents
-it:
-
-| Path | Contents |
-|---|---|
-| `scripts/analysis/` | Confidence intervals, nDCG rescaling, MTEB correlation, tournament inversions, the math-vs-word similarity sweep |
-| `scripts/plots/` | One script per figure |
-| `scripts/tables/` | The generators `report_experiments.py` runs, in order |
-| `scripts/config/` | `tournament.yaml` and `math_vs_word.yaml` |
-
-Nothing under `src/` is runnable: the package is import-only and has no
-`__main__` block anywhere. Scripts `import sabermath` directly rather than
-manipulating `sys.path`, so install the package first:
+## Prerequisites for everything
 
 ```bash
 python -m pip install -e .
 ```
 
-## Per-experiment write-ups
+Every script imports the installed package. Nothing under `src/` is runnable
+on its own. Most models additionally need a specific conda environment — see
+[experiment-evaluation.md](experiment-evaluation.md).
+
+## Endpoints
+
+| Script | Produces | Written to |
+|---|---|---|
+| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms | `results/evaluation/` |
+| `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | `results/dedup/` |
+| `scripts/run_timing.py` | Per-query latency on production backends | `results/timing/` |
+| `scripts/report_experiments.py` | Every table | `results/tables/` |
+
+Every analysis and figure is its own script under `scripts/analysis/` and
+`scripts/plots/`; `scripts/tables/` holds the generators
+`report_experiments.py` runs, and `scripts/config/` the two YAML configs they
+read. Each script's `--help` is the authoritative reference for its flags.
+
+## Per-experiment pages
 
 | Document | Experiment |
 |---|---|
-| [experiment-evaluation.md](experiment-evaluation.md) | Running an nDCG sweep: environments, sharding, resuming, output naming |
-| [experiment-instructions.md](experiment-instructions.md) | Does a task instruction help? The four prompt arms |
+| [experiment-evaluation.md](experiment-evaluation.md) | nDCG evaluation: environments, sharding, resuming, output naming |
+| [experiment-instructions.md](experiment-instructions.md) | The four instruction-prompt arms |
 | [experiment-dedup.md](experiment-dedup.md) | Where a rephrased copy of a query's own problem ranks |
-| [experiment-rescaling.md](experiment-rescaling.md) | Does the ranking survive a different gain or relevance scale? |
-| [experiment-timing.md](experiment-timing.md) | Per-query latency: the measurement protocol |
-| [experiment-latency.md](experiment-latency.md) | Latency vs. quality (figure 2) |
+| [experiment-rescaling.md](experiment-rescaling.md) | Replaying rankings under a different gain or relevance scale |
 | [experiment-confidence-intervals.md](experiment-confidence-intervals.md) | Bootstrap confidence intervals |
-| [experiment-math-vs-word.md](experiment-math-vs-word.md) | Do retrievers key on notation or on prose? |
-| [experiment-mteb.md](experiment-mteb.md) | Correlation with general-purpose MTEB retrieval |
-| [experiment-benchmark-analysis.md](experiment-benchmark-analysis.md) | Benchmark and source-corpus composition |
-| [experiment-additional.md](experiment-additional.md) | Construction-pipeline checks: tournament convergence, selection signals |
+| [experiment-timing.md](experiment-timing.md) | Per-query latency |
+| [experiment-latency.md](experiment-latency.md) | Latency vs. quality (figure 2) |
+| [experiment-math-vs-word.md](experiment-math-vs-word.md) | Equations vs. prose: figure and table |
+| [experiment-mteb.md](experiment-mteb.md) | Correlation with MTEB Retrieval |
+| [experiment-benchmark-analysis.md](experiment-benchmark-analysis.md) | Dataset composition charts |
+| [experiment-additional.md](experiment-additional.md) | Construction-pipeline checks |
 
-## How models are configured
+## Results layout
 
-| Document | What it settles |
+| Path | Contents |
 |---|---|
-| [protocol.md](protocol.md) | What each model actually receives: input envelopes, instruction templates and placement |
-| [backend-provenance.md](backend-provenance.md) | Why each model is served on the backend it is, and what that was checked against |
-
-## Where results live
-
-Every result is under one `results/` root, one directory per experiment — the
-table in the [repository README](../README.md#results) lists them.
-
-Every evaluation run records the protocol that produced it, so which run backs
-a given table row is decided by the run's own metadata rather than by which
-directory it sits in.
+| `results/evaluation/` | Every nDCG run, `<model>__<prompt>.json` |
+| `results/timing/` | Per-query latency |
+| `results/dedup/` | Deduplication rankings |
+| `results/confidence/` | Bootstrap confidence intervals |
+| `results/rescaled/`, `results/rescaling/` | Relevance-rescaling robustness |
+| `results/math_vs_word/` | Similarity dumps and figures |
+| `results/latency/` | Latency-vs-quality figure and its data |
+| `results/diagnostics/` | Archived backend-equivalence and protocol verdicts |
+| `results/tables/` | Generated tables |

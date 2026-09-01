@@ -1,72 +1,31 @@
 #!/usr/bin/env python3
 import argparse
-import ast
 import json
 from pathlib import Path
 
 from sabermath.math_vs_word import SIMILARITIES_DIR
+from sabermath.math_vs_word.aggregate import NON_EMBEDDING_METHODS
 from sabermath.math_vs_word.load_models import get_scores_kwargs
+from sabermath.math_vs_word.roster import (
+    LOAD_MODELS_PY,
+    REGISTRY_PY,
+    allowed_models,
+)
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
-HERE = Path(__file__).resolve().parent
 EXPECTED_TARGETS = 969
 SIM_FIELDS = (
     "pr_full_vs_candidates",
     "pr_math_vs_candidates",
     "pr_text_vs_candidates",
 )
-NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
 
 def envelope_for(method: str) -> dict | None:
     try:
         return dict(get_scores_kwargs(method, "p0"))
     except Exception:
         return None
-
-def literal_env(path: Path, env: dict | None = None) -> dict:
-    env = {} if env is None else env
-    tree = ast.parse(path.read_text())
-
-    def evaluate(node):
-        if isinstance(node, ast.Name):
-            return env[node.id]
-        if isinstance(node, ast.Subscript):
-            return evaluate(node.value)[ast.literal_eval(node.slice)]
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            return evaluate(node.left) + evaluate(node.right)
-        if isinstance(node, (ast.List, ast.Tuple)):
-            return [evaluate(e) for e in node.elts]
-        if isinstance(node, ast.Dict):
-            return {
-                ast.literal_eval(k): evaluate(v)
-                for k, v in zip(node.keys, node.values)
-            }
-        return ast.literal_eval(node)
-
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
-                continue
-            try:
-                env[target.id] = evaluate(node.value)
-            except (ValueError, KeyError, TypeError, AttributeError):
-                pass  # not a plain literal - irrelevant to the roster
-    return env
-
-def allowed_models(path: Path, extra_sources: list[Path]) -> list[str]:
-    env: dict[str, object] = {}
-    for source in extra_sources:
-        if source.exists():
-            literal_env(source, env)
-    literal_env(path, env)
-
-    models = env.get("ALLOWED_MODELS")
-    if not models:
-        raise SystemExit(f"Could not read ALLOWED_MODELS from {path}")
-    return list(models)
 
 def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, str]:
     stem = method.replace("/", "_")
@@ -96,12 +55,12 @@ def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, st
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sim-dir", type=Path, default=SIMILARITIES_DIR)
-    parser.add_argument("--load-models", type=Path, default=HERE / "load_models.py")
+    parser.add_argument("--load-models", type=Path, default=LOAD_MODELS_PY)
     parser.add_argument(
         "--extra-source",
         type=Path,
         nargs="*",
-        default=[HERE.parent.parent / "scripts" / "run_experiments.py"],
+        default=[REGISTRY_PY],
         help="Modules whose top-level literals load_models.py imports.",
     )
     parser.add_argument(

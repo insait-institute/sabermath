@@ -11,30 +11,27 @@ from sabermath.figures import (
     DEFAULT_MODEL_COLORS,
     DEFAULT_MODEL_DISPLAY_NAMES,
     DEFAULT_MODEL_MARKER_SYMBOLS,
+    MODEL_ID_BY_KEY,
 )
+from sabermath.tables import build_rows, collect, load_timing
 
 REPO = Path(__file__).resolve().parents[2]
-DATA = REPO / "results/latency/data.csv"
+RESULTS_DIR = REPO / "results/evaluation"
+TIMING_DIR = REPO / "results/timing"
 OUT_DIR = REPO / "results/latency/plots"
 OUT_STEM = "figure2_latency"
+FALLBACK_DATA = REPO / "results/latency/data.csv"
 
 # Colour of the 27 models with no legend entry.
 OTHER_COLOR = "#C0C4C8"
 
-# The two frontiers differ in hue, dash and weight, so which is which reads
-# without the legend. The cross-encoder red is deeper than plot_hist's #e53935
-# because that is RaDeR-7B's marker colour and the line passes within a few
-# pixels of it.
 FRONTIER_STYLES = {
     "bi-encoder": {"color": "#263238", "dashes": (), "linewidth": 2.6},
     "cross": {"color": "#C62828", "dashes": (3, 1.8), "linewidth": 3.2},
 }
 
-# From the mini figure, whose caption defines what the mark means.
 STARRED = {"jaccard", "bm25", "lightonai/Reason-ModernColBERT"}
 
-# These two are 0.03 s and 0.002 nDCG apart, close enough that whichever draws
-# second hides the other. They sit on different frontiers, so pin the order.
 MARKER_ZORDER = {"Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": 5}
 DEFAULT_MARKER_ZORDER = 4
 
@@ -43,19 +40,90 @@ FRONTIER_TITLES = {
     "cross": "Cross-Encoder / Late Int. Frontier",
 }
 
-# Axis window, matching the mini's: one decade every 75.7px from 0.01s, and
-# 0.25-0.80 nDCG.
 X_LIM = (0.01, 150.0)
 Y_LIM = (0.25, 0.80)
 
-def load_rows() -> list[dict]:
-    with DATA.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+def fallback_latency() -> dict[str, float]:
+    """Pre-measurement latencies, by figure model id. See FALLBACK_DATA."""
+    if not FALLBACK_DATA.exists():
+        return {}
+    with FALLBACK_DATA.open(newline="", encoding="utf-8") as f:
+        return {row["model_id"]: float(row["latency_s"]) for row in csv.DictReader(f)}
 
+
+def frontier_class(category: str) -> str:
+    """Which frontier a model competes on."""
+    return "cross" if category == "RERANK" else "bi-encoder"
+
+
+def mark_frontiers(rows: list[dict]) -> None:
     for row in rows:
-        row["latency_s"] = float(row["latency_s"])
-        row["ndcg"] = float(row["ndcg"])
-        row["named"] = row["named"] == "1"
+        klass = frontier_class(row["category"])
+        dominated = any(
+            other is not row
+            and frontier_class(other["category"]) == klass
+            and other["ndcg"] >= row["ndcg"]
+            and other["latency_s"] <= row["latency_s"]
+            and (
+                other["ndcg"] > row["ndcg"]
+                or other["latency_s"] < row["latency_s"]
+            )
+            for other in rows
+        )
+        row["frontier"] = "" if dominated else klass
+        # Only frontier models get a legend entry; the rest are the grey cloud.
+        row["named"] = not dominated
+
+
+def load_rows() -> list[dict]:
+    runs, ranks = collect(RESULTS_DIR)
+    scored, pending = build_rows(runs, ranks)
+    timing = load_timing(TIMING_DIR)
+    fallback = fallback_latency()
+
+    rows, no_latency, fell_back = [], [], []
+
+    for row in scored:
+        entry = row.get("statement-full")
+        if entry is None:
+            continue
+        model_id = MODEL_ID_BY_KEY.get(row["key"])
+        if model_id is None:
+            continue
+
+        measured = timing.get(row["key"])
+        if measured is not None:
+            latency = float(measured["median_seconds"])
+        elif model_id in fallback:
+            latency = fallback[model_id]
+            fell_back.append(row["name"])
+        else:
+            no_latency.append(row["name"])
+            continue
+
+        rows.append(
+            {
+                "model_id": model_id,
+                "key": row["key"],
+                "name": row["name"],
+                "category": row["category"],
+                "latency_s": latency,
+                "ndcg": float(entry[0]),
+            }
+        )
+
+    mark_frontiers(rows)
+
+    print(f"[+] {len(rows)} models: nDCG from {RESULTS_DIR.name}, "
+          f"latency from {TIMING_DIR.name}")
+    if fell_back:
+        print(f"[~] no timing run for {len(fell_back)} model(s), using "
+              f"{FALLBACK_DATA.name}: {', '.join(sorted(fell_back))}")
+    if no_latency:
+        print(f"[!] no latency at all, left out: {', '.join(sorted(no_latency))}")
+    if pending:
+        print(f"[~] {len(pending)} model(s) with no usable run: "
+              f"{', '.join(name for _, name, _ in pending)}")
 
     return rows
 
@@ -71,8 +139,6 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(15, 8), dpi=150)
     ax.set_facecolor((0.97, 0.97, 0.97))
 
-    # The unnamed models: one grey cloud, one handle. Drawn smaller and below
-    # the named markers, so a frontier model landing on one still reads.
     others = [row for row in rows if not row["named"]]
 
     ax.scatter(
@@ -87,9 +153,6 @@ def main() -> None:
         zorder=3,
     )
 
-    # steps-pre reproduces the mini's staircase: the line rises to the next
-    # model's score before running right to its latency, so each step meets the
-    # marker it names.
     frontier_handles = {}
 
     for frontier, style in FRONTIER_STYLES.items():
@@ -107,7 +170,6 @@ def main() -> None:
         line.set_label(FRONTIER_TITLES[frontier])
         frontier_handles[frontier] = line
 
-    # In each frontier's left-to-right order, which is also its legend order.
     model_handles = {"bi-encoder": [], "cross": []}
 
     for frontier in ("bi-encoder", "cross"):
@@ -141,16 +203,12 @@ def main() -> None:
     ax.xaxis.set_major_locator(FixedLocator([0.01, 0.1, 1.0, 10.0, 100.0]))
     ax.xaxis.set_minor_locator(FixedLocator([]))
     ax.xaxis.set_major_formatter(
-        # "0.01 s" .. "100 s" - the unit rides on the tick, as in the mini,
-        # which is why there is no x label.
         FuncFormatter(lambda v, _: f"{v:g} s")
     )
 
     ax.set_yticks([0.25, 0.35, 0.45, 0.55, 0.65, 0.75])
     ax.set_ylabel("nDCG@10 (statement–full)", fontsize=22, labelpad=12)
 
-    # Padded outwards: at the origin the bottom y label and the leftmost x
-    # label are diagonal neighbours and sat almost touching.
     ax.tick_params(axis="x", labelsize=22, pad=12)
     ax.tick_params(axis="y", labelsize=23, pad=10)
 
@@ -159,8 +217,6 @@ def main() -> None:
 
     sns.despine(ax=ax, left=True, bottom=True)
 
-    # One box under the axes, three columns, each frontier group headed by its
-    # own line in bold.
     other_handle = Line2D(
         [],
         [],
@@ -173,9 +229,6 @@ def main() -> None:
         label="All other models",
     )
 
-    # One flat run rather than a column per group: matplotlib fills columns
-    # top-to-bottom, and a column per group would set the legend's height to
-    # the taller group's row count - the space these 3 columns exist to save.
     handles = [
         frontier_handles["bi-encoder"],
         *model_handles["bi-encoder"],
@@ -184,9 +237,6 @@ def main() -> None:
         other_handle,
     ]
 
-    # Spans the figure's full visual width, from the rotated y label's leftmost
-    # extent to the right edge of the plot. That position is only known once
-    # the text is laid out, so draw first and measure rather than guess.
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     label_left = ax.yaxis.label.get_window_extent(renderer).x0
@@ -207,9 +257,6 @@ def main() -> None:
         borderaxespad=0.0,
         labelspacing=0.55,
         columnspacing=2.0,
-        # matplotlib scales a dash pattern by line width, so this length ends
-        # the handle in the gap after a dash rather than partway into one.
-        # Much above 3 and the labels run into the next column's handle.
         handlelength=2.9,
         handletextpad=0.6,
     )
@@ -220,13 +267,10 @@ def main() -> None:
 
     legends = [legend]
 
-    # Not tight_layout: it would grow the axes box down into the gap the
-    # legends are anchored in. bbox_inches extends the canvas instead.
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for suffix in ("pdf", "svg"):
         path = OUT_DIR / f"{OUT_STEM}.{suffix}"
-        # A tight bbox does not measure an artist anchored outside the axes.
         fig.savefig(
             path, dpi=300, bbox_inches="tight", bbox_extra_artists=legends
         )

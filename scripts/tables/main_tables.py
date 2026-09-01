@@ -93,10 +93,8 @@ Confidence intervals are 95% percentile bootstrap, 10,000 resamples, seed
 42411. Only the overall column carries one here; per-domain intervals are in
 RESULTS_confidence_intervals.md.
 
-What each model receives is documented in docs/protocol.md. Notably:
-multilingual-e5-large deliberately keeps our prompt-free configuration against
-its model card, and ReasonIR-8B runs on the official remote-code path rather
-than vLLM.
+Each model's input envelope and instruction handling are in
+src/sabermath/registry.py, beside that model's entry.
 -->
 """
 

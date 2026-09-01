@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from sabermath.results import load_runs
+
 
 USAGE = """\
   python scripts/report_experiments.py                 # everything
@@ -31,10 +33,6 @@ def _run(label: str, script: str, argv: list[str], optional: bool = False) -> bo
     )
     if completed.returncode == 0:
         return True
-    # Say WHY. An `optional` generator whose inputs are genuinely missing and
-    # one that crashed both exit non-zero, and reporting either as "inputs not
-    # ready" hides real breakage - a ModuleNotFoundError read as a missing
-    # sweep for a whole session.
     reason = ""
     for line in reversed((completed.stderr or "").strip().split("\n")):
         if line.strip():
@@ -48,7 +46,10 @@ def _run(label: str, script: str, argv: list[str], optional: bool = False) -> bo
 
 
 def report_confidence(out_dir: Path) -> bool:
-    p0 = sorted((RESULTS / "evaluation").glob("*__p0.json"))
+    runs = load_runs(RESULTS / "evaluation", prompts=["p0"])
+    p0 = sorted(
+        {Path(payload["_path"]) for payload in runs.values() if "_path" in payload}
+    )
     if not p0:
         print("[~] no p0 runs found - skipping CI recompute")
         return True
@@ -127,6 +128,16 @@ def report_rescaling(out_dir: Path) -> bool:
     )
 
 
+def report_math_vs_word(out_dir: Path) -> bool:
+    return _run(
+        "math-vs-word table (equations vs prose, per instruction arm)",
+        "scripts/tables/math_vs_word_table.py",
+        ["--out-md", str(out_dir / "RESULTS_math_vs_word.md"),
+         "--out-tex", str(out_dir / "math_vs_word_instructions.tex")],
+        optional=True,
+    )
+
+
 def report_mteb(out_dir: Path) -> bool:
     if not MTEB_CSV.exists():
         print(f"[~] MTEB rank correlation: no leaderboard CSV at {MTEB_CSV} "
@@ -148,6 +159,7 @@ REPORTS = {
     "timing": report_timing,
     "dedup": report_dedup,
     "rescaling": report_rescaling,
+    "math-vs-word": report_math_vs_word,
     "mteb": report_mteb,
 }
 
@@ -189,9 +201,6 @@ def main() -> None:
             f"Unknown report(s): {', '.join(unknown)}. "
             f"Available: {', '.join(REPORTS)}"
         )
-
-    # Preserve declaration order even when the user lists them out of order:
-    # 'confidence' writes the intervals 'main' reads.
     selected = [r for r in REPORTS if not args.reports or r in args.reports]
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -20,6 +19,16 @@ from sabermath.figures import (
 )
 from sabermath.math_vs_word.sim_helpers import get_math_words_tokens
 from sabermath.math_vs_word import PLOTS_DIR, SIMILARITIES_DIR
+from sabermath.math_vs_word.aggregate import (
+    BASELINE_ARM,
+    DOMAIN_ORDER,
+    GROUP_NAMES,
+    aggregate_math_vs_words,
+    build_id_to_domain,
+    get_first_domain,
+    load_similarity_content,
+    normalize_arm,
+)
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
@@ -39,7 +48,11 @@ MODEL_IDS = [
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-file", required=True)
+    parser.add_argument(
+        "--config-file",
+        default=CONFIG_DIR / "math_vs_word.yaml",
+        help="Defaults to scripts/config/math_vs_word.yaml.",
+    )
     parser.add_argument(
         "--all",
         action="store_true",
@@ -60,38 +73,11 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     config_file = args.config_file
 
-    def _normalize_instruction_suffix(value: str | None) -> str | None:
-        if value is None:
-            return None
-        key = str(value).strip().lower()
-        if key.startswith("p"):
-            key = key[1:]
-        if key not in {"1", "2", "3"}:
-            raise ValueError(
-                f"--instruction must be 1/2/3 or p1/p2/p3, got {value!r}"
-            )
-        return f"p{key}"
-
-    INSTRUCTION_SUFFIX = _normalize_instruction_suffix(args.instruction)
+    ARM = normalize_arm(args.instruction)
+    INSTRUCTION_SUFFIX = None if ARM == BASELINE_ARM else ARM
 
     SELECTED_MODEL_IDS = ALL_MODEL_IDS if args.all else MODEL_IDS
     PLOT_MODEL_IDS = SELECTED_MODEL_IDS + [MATH_TOKEN_RATIO_MODEL_ID]
-
-    DOMAIN_ORDER = [
-        "Algebra",
-        "Calculus and Analysis",
-        "Combinatorics",
-        "Geometry",
-        "Number Theory",
-    ]
-
-    GROUP_NAMES = DOMAIN_ORDER + ["All"]
-
-    TEXT_KEY = "pr_text_vs_candidates"
-    MATH_KEY = "pr_math_vs_candidates"
-
-    def model_to_file_stem(model_id: str) -> str:
-        return model_id.replace("/", "_")
 
     def model_to_display_name(
         model_id: str,
@@ -140,69 +126,6 @@ def main(argv=None) -> None:
             "`model_colors` in the YAML config."
         )
 
-    def load_similarity_content(model_id: str) -> dict[str, dict[str, Any]]:
-        model_name = model_to_file_stem(model_id)
-        baseline_path = SIMILARITIES_DIR / f"{model_name}.json"
-        path = baseline_path
-
-        if INSTRUCTION_SUFFIX is not None:
-            instructed_path = SIMILARITIES_DIR / f"{model_name}__{INSTRUCTION_SUFFIX}.json"
-            if instructed_path.exists():
-                path = instructed_path
-            else:
-                print(
-                    f"[~] No {instructed_path.name} for {model_id!r} - "
-                    f"falling back to its baseline file ({baseline_path.name})."
-                )
-
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Could not find similarity file for model {model_id!r}: {path}"
-            )
-
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def get_first_domain(domains):
-        if isinstance(domains, (list, tuple)):
-            if len(domains) == 0:
-                raise ValueError("Encountered empty domains list.")
-            return str(domains[0]).strip()
-
-        if domains is None:
-            raise ValueError("Encountered None domain.")
-
-        return str(domains).strip()
-
-    def build_id_to_domain(
-        *,
-        all_content_ids: set[str],
-        targets_dataset_name: str,
-    ) -> dict[str, str]:
-        targets = load_dataset(targets_dataset_name, split="train").select_columns(
-            ["id", "domains"]
-        )
-
-        id_to_domain = {}
-
-        for target_id, domains in zip(targets["id"], targets["domains"]):
-            target_id = str(target_id)
-
-            if target_id in all_content_ids:
-                id_to_domain[target_id] = get_first_domain(domains)
-
-        missing_ids = [
-            target_id for target_id in all_content_ids if target_id not in id_to_domain
-        ]
-
-        if missing_ids:
-            raise KeyError(
-                f"{len(missing_ids)} ids from the similarity files were not found "
-                f"in the targets dataset. Examples: {missing_ids[:10]}"
-            )
-
-        return id_to_domain
-
     def target_math_token_ratio(target: Mapping[str, Any]) -> float:
 
         target_math_tokens, target_text_tokens = get_math_words_tokens(
@@ -218,90 +141,6 @@ def main(argv=None) -> None:
             )
 
         return float(len(target_math_tokens) / total_tokens)
-
-    MODELS_WITH_EXPECTED_TIES = {
-        "jaccard",
-        "diver-grouprank-32b",
-        "infly/inf-retriever-v1-pro",
-        "inf-x-retriever",
-        "retro-star-32b",
-        "retro-star-32b-rewritten",
-    }
-
-    def aggregate_maths_greater_than_words_by_domain(
-        content: Mapping[str, Mapping[str, Any]],
-        *,
-        id_to_domain: Mapping[str, str],
-        model_id: str,
-    ):
-        m_greater_w_counts = {group: 0 for group in GROUP_NAMES}
-        totals = {group: 0 for group in GROUP_NAMES}
-
-        skipped_ties = 0
-
-        for target_id, row in content.items():
-            target_id = str(target_id)
-
-            missing_keys = [key for key in [TEXT_KEY, MATH_KEY] if key not in row]
-
-            if missing_keys:
-                raise KeyError(
-                    f"Model {model_id!r}, target {target_id!r} is missing keys: "
-                    f"{missing_keys}"
-                )
-
-            if target_id not in id_to_domain:
-                raise KeyError(f"Model {model_id!r}, target {target_id!r} has no domain.")
-
-            domain = str(id_to_domain[target_id]).strip()
-
-            if domain not in DOMAIN_ORDER:
-                raise ValueError(
-                    f"Model {model_id!r}, target {target_id!r} has unknown domain "
-                    f"{domain!r}. Expected one of: {DOMAIN_ORDER}"
-                )
-
-            text_score = float(row[TEXT_KEY])
-            math_score = float(row[MATH_KEY])
-
-            if not np.isfinite(text_score) or not np.isfinite(math_score):
-                raise ValueError(
-                    f"Model {model_id!r}, target {target_id!r} has non-finite scores: "
-                    f"text={text_score}, math={math_score}"
-                )
-
-            if text_score == math_score:
-                if model_id in MODELS_WITH_EXPECTED_TIES:
-                    skipped_ties += 1
-                    continue
-
-                raise ValueError(
-                    f"Model {model_id!r}, target {target_id!r} has tied text/math "
-                    f"scores: text={text_score}, math={math_score}"
-                )
-
-            is_math_greater = math_score > text_score
-
-            totals["All"] += 1
-            totals[domain] += 1
-
-            if is_math_greater:
-                m_greater_w_counts["All"] += 1
-                m_greater_w_counts[domain] += 1
-
-        if skipped_ties:
-            print(f"Skipped {skipped_ties} tied text/math examples for {model_id!r}.")
-
-        percentages = {
-            group: (
-                100.0 * m_greater_w_counts[group] / totals[group]
-                if totals[group] > 0
-                else np.nan
-            )
-            for group in GROUP_NAMES
-        }
-
-        return percentages, m_greater_w_counts, totals
 
     def aggregate_target_math_token_ratio_by_domain(
         *,
@@ -568,7 +407,10 @@ def main(argv=None) -> None:
     targets_maths_words_dataset = config["hf_datasets"]["targets_maths_words_fixed"]
 
     contents_by_model = {
-        model_id: load_similarity_content(model_id) for model_id in SELECTED_MODEL_IDS
+        model_id: load_similarity_content(
+            model_id, ARM, SIMILARITIES_DIR, baseline_fallback=True
+        )
+        for model_id in SELECTED_MODEL_IDS
     }
 
     all_content_ids = set()
@@ -585,15 +427,21 @@ def main(argv=None) -> None:
     totals_by_model = {}
 
     for model_id, content in contents_by_model.items():
-        percentages, counts, totals = aggregate_maths_greater_than_words_by_domain(
+        stats = aggregate_math_vs_words(
             content,
-            id_to_domain=id_to_domain,
             model_id=model_id,
+            id_to_domain=id_to_domain,
         )
 
-        percentages_by_model[model_id] = percentages
-        counts_by_model[model_id] = counts
-        totals_by_model[model_id] = totals
+        if stats.ties_skipped:
+            print(
+                f"Skipped {stats.ties_skipped} tied text/math examples "
+                f"for {model_id!r}."
+            )
+
+        percentages_by_model[model_id] = stats.percentages
+        counts_by_model[model_id] = stats.counts
+        totals_by_model[model_id] = stats.totals
 
     math_token_ratio_percentages, math_token_ratio_averages, math_token_ratio_totals = (
         aggregate_target_math_token_ratio_by_domain(
@@ -626,7 +474,6 @@ def main(argv=None) -> None:
         else "maths_vs_words_selected_models.pdf"
     )
     if INSTRUCTION_SUFFIX is not None:
-        # Never silently overwrite the baseline plot.
         output_filename = output_filename.replace(".pdf", f"__{INSTRUCTION_SUFFIX}.pdf")
 
     fig, ax = plot_maths_greater_than_words_points(

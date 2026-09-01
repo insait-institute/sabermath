@@ -235,3 +235,34 @@ DEFAULT_MODEL_COLORS = {
     # Reference statistic: dashed line color
     MATH_TOKEN_RATIO_MODEL_ID: "#263238",
 }
+
+# Figure model id -> the model key used by results/evaluation and
+# results/timing (and by sabermath.tables.MODEL_INFO).
+#
+# The figures address models by their Hugging Face id because that is what the
+# similarity dumps are named after; the result files address them by the
+# registry's short key. sabermath.registry knows both, but importing it pulls
+# in torch and vLLM, which a plotting script should not need - so the mapping
+# is derived here instead, by a rule plus the ids that do not follow it.
+# Consumers validate the result against the keys they actually have, so a
+# wrong or stale entry raises rather than dropping a model from a figure.
+_MODEL_KEY_EXCEPTIONS = {
+    "Raderspace/RaDeR_Qwen25-14B_NuminaMath_MATH_allquerytypes": "rader-14b",
+    "Raderspace/RaDeR_Qwen25-7B_NuminaMath_MATH_allquerytypes": "rader-7b",
+    "Raderspace/RaDeR_Qwen25_3B_NuminaMath_MATH_allquerytypes": "rader-3b",
+    "lightonai/GTE-ModernColBERT-v1": "gte-moderncolbert",
+    "lightonai/Reason-ModernColBERT": "reason-moderncolbert",
+    "hanhainebula/reason-embed-qwen3-8b-0928": "reason-embed-qwen3-8b",
+    "hanhainebula/reason-embed-llama-3.1-8b-0928": "reason-embed-llama-3.1-8b",
+}
+
+
+def model_key_for_id(model_id: str) -> str:
+    """The results-file key for a figure model id."""
+    if model_id in _MODEL_KEY_EXCEPTIONS:
+        return _MODEL_KEY_EXCEPTIONS[model_id]
+    return model_id.rsplit("/", 1)[-1].lower()
+
+
+MODEL_KEY_BY_ID = {model_id: model_key_for_id(model_id) for model_id in ALL_MODEL_IDS}
+MODEL_ID_BY_KEY = {key: model_id for model_id, key in MODEL_KEY_BY_ID.items()}

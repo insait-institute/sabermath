@@ -124,7 +124,7 @@ def main(argv=None) -> None:
         type=Path,
         default=Path("results/confidence"),
         help="Where to write the per-model CI JSONs (default: the same "
-        "confresult/ directory confidence.py writes to, so json_to_tex.py "
+        "confresult/ directory confidence.py writes to, so the table "
         "sees every model at once)",
     )
     args = parser.parse_args(argv)

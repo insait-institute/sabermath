@@ -1,67 +1,49 @@
-# Benchmark vs MTEB Retrieval Correlation
+# SABER-Math vs MTEB Retrieval
 
-Compares SABER-Math Overall scores against MTEB Retrieval scores from a
-leaderboard CSV. It reports:
-- Pearson correlation
-- Pearson p-value
-- Spearman correlation
-- Spearman p-value
-- Matched model table with benchmark rank and MTEB retrieval rank
+Correlates each model's SABER-Math Overall score against its MTEB Retrieval
+score.
 
-## Where the benchmark scores come from
+## Prerequisites
 
-They are **not** stored in this file or anywhere else in the analysis. The
-Overall column is read live from `results/evaluation/` through the same code
-path that builds the paper's main table
-(`sabermath.tables.build_rows`), so the correlation can never be
-computed against numbers the tables no longer report. Only the SABER-Math
-model key to MTEB leaderboard name mapping is hardcoded, in
-`MTEB_MODEL_NAMES`; a `None` there means there is no obvious MTEB counterpart
-and the row is left out of the correlation.
+- `python -m pip install -e .` (needs `pandas` and `scipy`).
+- Runs in `results/evaluation/`. The Overall column is read live through
+  `sabermath.tables.build_rows`, the same path the main table uses — nothing
+  is transcribed. Point elsewhere with `--results-dir`.
+- An MTEB leaderboard CSV. It is not redistributable, so it is not in this
+  repo. Required columns:
 
-Point it at a different set of runs with `--results-dir`.
-
-## Input CSV
-
-The MTEB CSV file must contain at least these columns:
-- Model
-- Retrieval
-
-The script also supports the optional column:
-- Rank (Borda)
-
-Rank (Borda) is only used as a duplicate tie-breaker. It is not used in the correlations.
+  | Column | Use |
+  |---|---|
+  | `Model` | joined to `MTEB_MODEL_NAMES` in `scripts/analysis/mteb_correlation.py` |
+  | `Retrieval` | the MTEB score |
+  | `Rank (Borda)` | optional; duplicate tie-breaker only, never correlated |
 
 ## Usage
 
-Run with all benchmark models:
-
 ```bash
 python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv
-```
-
-Run only with the newer presented models:
-
-```bash
 python scripts/analysis/mteb_correlation.py --mteb-file path/to/mteb.csv --new-models-only
 ```
 
-`scripts/report_experiments.py mteb` runs the first form for you, using
-`results/mteb/leaderboard.csv` (or `--mteb-file`). The leaderboard export is
-not redistributable, so it is not in this repo; the report is skipped with a
-note when it is absent.
+`--new-models-only` drops the BGE, BERT, RoBERTa, E5 and `text-embedding-*`
+families.
 
-## --new-models-only
+```bash
+python scripts/report_experiments.py mteb --mteb-file path/to/mteb.csv
+```
 
-When this flag is provided, the script excludes these model families from the correlation:
-- BGE models
-- BERT models
-- RoBERTa models
-- E5 models
-- text-embedding-* models
+The report defaults to `results/mteb/leaderboard.csv` and is skipped with a
+note when that file is absent.
 
-## Notes
-    - Pearson uses the raw benchmark Overall and MTEB Retrieval score values.
-    - Spearman uses the same two score columns but ranks them internally.
-    - Both scores are higher-is-better, so no sign flip is applied.
-    - Models without an MTEB mapping or without a Retrieval score are excluded from the final correlation.
+## Output
+
+Printed to stdout:
+
+- Pearson r and p-value, on the raw score values;
+- Spearman rho and p-value, on the same two columns ranked internally;
+- the matched-model table with each model's benchmark rank and MTEB retrieval
+  rank.
+
+Both scores are higher-is-better, so no sign flip is applied. A model with no
+MTEB mapping (`None` in `MTEB_MODEL_NAMES`) or no Retrieval score is listed
+but excluded from the correlation.

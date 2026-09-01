@@ -1,33 +1,43 @@
-# Dataset Domain Pie Charts
+# Dataset composition charts
 
-These generate sunburst/pie charts showing the distribution of mathematical
-domains and subdomains. They live in `src/sabermath/`.
+Sunburst charts of how the benchmark and its source corpus distribute across
+mathematical domains and subdomains.
+
+## Prerequisites
+
+- `python -m pip install -e .` (needs `matplotlib`).
+- The Hugging Face dataset name, passed on the command line. The databank arm
+  expects `numeric` and `proofs` splits and derives each problem's domains
+  from its ontology tags; the benchmark arm reads the domains the dataset
+  already carries.
 
 ## Usage
-Plot the benchmark queries dataset:
 
 ```bash
-python scripts/plots/plot_dataset.py benchmark <benchmark targets dataset>
-```
+# the benchmark queries
+python scripts/plots/plot_dataset.py benchmark <hf-dataset>
 
-Plot the candidate documents for a specific target query:
+# the full source databank
+python scripts/plots/plot_dataset.py databank <hf-dataset>
 
-```bash
+# the candidates of one target query
 python scripts/plots/plot_candidates.py \
-    --targets-dataset <benchmark targets dataset> \
-    --candidates-dataset <benchmark candidates dataset> \
-    --targ-idx <target problem index>
+    --targets-dataset <hf-dataset> \
+    --candidates-dataset <hf-dataset> \
+    --targ-idx <index>
 ```
 
-Plot an entire databank dataset:
-
-```bash
-python scripts/plots/plot_dataset.py databank --databank-dataset <dataset_name>
-```
+`plot_dataset.py` takes `--out-file` to override the destination;
+`plot_candidates.py` takes `--top-k` (default 10) for how many of the most
+relevant candidates to mark.
 
 ## Output
-Each script saves a PDF pie chart showing:
 
-inner ring: main mathematical domains
-outer ring: subdomains/topics
-For candidate plots, the chart is generated only for the candidate documents associated with the target index passed with --targ-idx.
+| Command | Default file |
+|---|---|
+| `plot_dataset.py benchmark` | `piechart_benchmark.pdf` |
+| `plot_dataset.py databank` | `piechart_databank.pdf` |
+| `plot_candidates.py` | `math_dataset_sunburst.pdf`, for the given target index |
+
+Each chart has an inner ring of main mathematical domains and an outer ring of
+subdomains, with the problem count in the centre.

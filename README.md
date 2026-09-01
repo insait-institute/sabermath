@@ -188,14 +188,12 @@ environment that model family needs.
 | `results/dedup/` | Deduplication rankings |
 | `results/confidence/` | Bootstrap confidence intervals |
 | `results/rescaled/`, `results/rescaling/` | Relevance-rescaling robustness |
-| `results/math_vs_word/` | Similarity dumps and figures |
+| `results/math_vs_word/` | Similarity dumps, figures, and the per-arm table |
 | `results/latency/` | Latency-vs-quality figure data |
 | `results/diagnostics/` | Backend-equivalence verdicts |
 | `results/tables/` | Generated tables |
 
-Every evaluation run records the protocol that produced it, so which run backs
-a given table row is decided by the run's own metadata rather than by which
-directory it sits in. Regenerate every table with:
+Regenerate every table with:
 
 ```bash
 python scripts/report_experiments.py
@@ -210,13 +208,10 @@ maps every experiment to its endpoint, its write-up and its output directory.
 |---|---|
 | [experiments-overview.md](docs/experiments-overview.md) | The index — start here |
 | [experiment-evaluation.md](docs/experiment-evaluation.md) | Running an nDCG sweep: environments, sharding, resuming, output naming |
-| [protocol.md](docs/protocol.md) | What each model actually receives: input envelopes, instruction templates, placement |
-| [backend-provenance.md](docs/backend-provenance.md) | Why each model is served on the backend it is, and what that was checked against |
 | [build_benchmark/README.md](build_benchmark/README.md) | Recreating the benchmark from the raw corpus |
 
-The remaining `docs/experiment-*.md` files cover one experiment each. Every
-document in `docs/` is there to reproduce something; the working notes from
-the 2026-08-25 protocol change were removed on 2026-08-31.
+The remaining `docs/experiment-*.md` files cover one experiment each. Each
+gives its prerequisites, the commands, and the output format — nothing else.
 
 ## License
 

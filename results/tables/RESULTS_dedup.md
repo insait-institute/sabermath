@@ -8,9 +8,8 @@ similarity to the original query statement. The reported rank is the
 position of the inserted copy. **Lower is better.**
 
 The `SABER-Math` column is **statement-statement** nDCG@10, matching
-the task setting the dedup vectors are built in. The rebuttal table
-quoted statement-full beside these numbers, which compares two
-different settings - see docs/experiment-dedup.md.
+the task setting the dedup vectors are built in - not statement-full,
+which is a different setting. See docs/experiment-dedup.md.
 
 ---
 
@@ -50,10 +49,10 @@ among 151. Every model can run this regime.
 | Reason-ModernColBERT           | 0.539      | 27.02     | 10.5      | 19.9% | 27.5% | 36.2% | 45.5% | 56.9%  | 70.4%  | 84.7%  | 98.1%   |
 | KaLM-Embedding-Gemma3-12B-2511 | 0.579      | 22.59     | 11.0      | 15.7% | 23.3% | 31.5% | 43.2% | 57.1%  | 75.0%  | 90.7%  | 99.8%   |
 | INF-Retriever-v1-Pro           | 0.564      | 24.86     | 11.0      | 19.5% | 26.2% | 34.7% | 45.3% | 58.8%  | 70.8%  | 87.4%  | 99.6%   |
+| EmbeddingGemma-300m            | 0.511      | 26.51     | 11.0      | 17.7% | 26.1% | 34.6% | 44.8% | 58.3%  | 69.4%  | 85.3%  | 99.4%   |
 | BM25                           | 0.426      | 26.98     | 11.0      | 21.6% | 29.4% | 38.6% | 46.5% | 57.5%  | 69.8%  | 85.6%  | 97.8%   |
 | BM25-no-tok                    | 0.409      | 24.02     | 12.0      | 19.4% | 26.6% | 34.5% | 43.9% | 57.2%  | 73.5%  | 88.0%  | 99.7%   |
 | LLaMa-Embed-Nemotron-8b        | 0.565      | 26.92     | 12.0      | 17.8% | 25.3% | 33.8% | 42.9% | 56.2%  | 69.1%  | 84.5%  | 99.5%   |
-| EmbeddingGemma-300m            | 0.511      | 27.86     | 13.0      | 17.9% | 25.0% | 33.4% | 43.6% | 55.7%  | 67.7%  | 83.8%  | 99.5%   |
 | Harrier-OSS-v1-27b             | 0.585      | 26.64     | 14.5      | 15.9% | 22.2% | 30.3% | 39.1% | 52.6%  | 68.7%  | 86.4%  | 99.7%   |
 | Jina-Embeddings-v5-Text-Small  | 0.549      | 29.41     | 15.0      | 15.5% | 21.2% | 29.4% | 40.5% | 52.6%  | 65.9%  | 82.9%  | 99.6%   |
 | Jaccard-no-tok                 | 0.424      | 36.11     | 24.0      | 13.5% | 17.3% | 23.8% | 32.4% | 42.9%  | 56.9%  | 76.2%  | 99.7%   |
@@ -76,8 +75,8 @@ among 151. Every model can run this regime.
 ## 2. All documents
 
 The copy competes against all 71,117 documents. A much harder
-question with no published reference. Bi-encoders and lexical models
-only: a pair scorer would need 71,117 forward passes per query.
+question. Bi-encoders and lexical models only: a pair scorer would
+need 71,117 forward passes per query.
 
 | Model                          | SABER-Math | Avg. Rank | Med. Rank | Top-1 | Top-2 | Top-4 | Top-8 | Top-16 | Top-32 | Top-64 | Top-128 |
 |--------------------------------|------------|-----------|-----------|-------|-------|-------|-------|--------|--------|--------|---------|
@@ -121,26 +120,6 @@ only: a pair scorer would need 71,117 forward passes per query.
 
 ---
 
-## 3. Reproduction of the published rows
-
-The nine rows in `saberniki2/dedup_results.txt`, against ours.
-`avg / median`. A row is only comparable where the configuration
-matches; the Note column says when it does not.
-
-| Model                   | Published    | Ours         | Protocol  | Delta (med.) | Note                                                                                               |
-|-------------------------|--------------|--------------|-----------|--------------|----------------------------------------------------------------------------------------------------|
-| Reason-Embed-Qwen3-8B   | 3.10 / 1.0   | 3.10 / 1.0   | canonical | +0.0         | comparable                                                                                         |
-| Gemini-Embedding-2      | 5.37 / 2.0   | 5.37 / 2.0   | canonical | +0.0         | comparable                                                                                         |
-| Octen-Embedding-8B      | 6.85 / 2.0   | 6.85 / 2.0   | canonical | +0.0         | comparable                                                                                         |
-| Qwen3-Embedding-4B      | 9.53 / 3.0   | 9.53 / 3.0   | canonical | +0.0         | comparable                                                                                         |
-| Qwen3-Embedding-8B      | 15.81 / 6.0  | 15.81 / 6.0  | canonical | +0.0         | comparable                                                                                         |
-| BM25                    | 24.09 / 11.0 | 26.98 / 11.0 | canonical | +0.0         | theirs tokenizes `text.lower().split()` (our `bm25-no-tok`); ours uses the Approach Zero tokenizer |
-| TF-IDF                  | 25.92 / 10.5 | 66.90 / 68.0 | canonical | +57.5        | theirs uses word 1-2 grams + sublinear TF; ours uses Approach Zero unigrams with raw TF            |
-| EmbeddingGemma-300m     | 26.52 / 11.0 | 26.51 / 11.0 | legacy    | +0.0         | published row is prompt-free; our canonical row applies the vendor envelope                        |
-| LLaMa-Embed-Nemotron-8b | 26.92 / 12.0 | 26.92 / 12.0 | canonical | +0.0         | comparable                                                                                         |
-
----
-
 ## Notes
 
 - **Self-match exclusion is a no-op in regime 1.** 92.8% of query
@@ -148,20 +127,17 @@ matches; the Note column says when it does not.
   each query's own original matters a great deal in regime 2. Measured,
   **0 of those 928 self-documents fall inside their own query's
   150-candidate list**, so regime 1 is unaffected either way.
-- **The published open-weights rows are prompt-free.**
-  `saberniki2/embed_duplicates.py` embeds raw text and has no prefix,
-  prompt or task-type parameter at all; `make_cache.py`'s prefixes
-  default to empty. Our canonical runs apply each model's vendor input
-  envelope. On `embeddinggemma-300m`, isolated end-to-end, that is the
-  entire difference: prompt-free gives avg 26.51 / median 11.0 against
-  the published 26.52 / 11.0, while the envelope gives 27.86 / 13.0.
 - **What this experiment measures.** The rephrasings preserve the
   mathematics and replace the prose: over all 1000 pairs, Jaccard
   between a target and its own rephrase is **0.735 on Approach Zero
   math tokens but 0.191 on prose words**. Deduplication here is largely
   a notation-matching task, which is why BM25 places far above its
   retrieval score on it.
-- `avg_rank` is reported for continuity with the published rows but is
-  not the statistic to read: the distribution has a long tail driven by
-  degenerate query texts, so a handful of queries move the mean by an
-  order of magnitude. Median and the top-k coverage are robust.
+- `avg_rank` is not the statistic to read: the distribution has a
+  long tail driven by degenerate query texts, so a handful of
+  queries move the mean by an order of magnitude. Median and the
+  top-k coverage are robust.
+
+### Still running (4 of 53)
+
+`reason-embed-llama-3.1-8b`, `reason-rewriter-reason-embed-8b`, `retro-star-32b`, `retro-star-32b-rewritten`

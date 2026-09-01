@@ -29,10 +29,6 @@ USAGE = """\
 
   # stitch a sharded sweep back together
   python scripts/run_dedup.py --merge-shards
-
-Results land in results/dedup/; read them with scripts/report_experiments.py.
-See docs/experiment-dedup.md for the two regimes and the two insertion
-readings, which must never be merged into one table.
 """
 
 DEFAULT_REPHRASED_DATASET = "RAG4Math/targets-with-rephrased"

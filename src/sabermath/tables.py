@@ -15,7 +15,23 @@ BRANCH_TO_DOMAIN = {
     "calculus and analysis": "calculus",
 }
 
+# Every model key the tables can report, with its display name and the
+# architecture class its scorer belongs to. `collect()` drops any run whose key
+# is missing here, so an omission silently deletes a row: the four
+# ReasonEmbed/ReasonReranker rows below - the top of the paper's main table -
+# were absent from this map and therefore from every generated main table,
+# despite complete runs sitting in results/evaluation.
+#
+# Names and classes follow the paper-row table in
+# scripts/tables/instruction_statement_full.py, whose Type codes end in the
+# architecture letter: C (cross-encoder) -> RERANK, B (bi-encoder) -> EMBED.
+# The two rewrite rows are composed pipelines (rewriter + scorer) and are
+# classed by their scorer, which is what every consumer of this map needs.
 MODEL_INFO = {
+    "retro-star-32b-rewritten": ("ReasonReranker-Qwen3-32B-Rewrite", "RERANK"),
+    "reason-rewriter-reason-embed-8b": ("ReasonEmbed-Qwen3-8B-Rewrite", "EMBED"),
+    "retro-star-32b": ("ReasonReranker-Qwen3-32B", "RERANK"),
+    "reason-embed-llama-3.1-8b": ("ReasonEmbed-Llama-3.1-8B", "EMBED"),
     "reason-embed-qwen3-8b": ("Reason-Embed-Qwen3-8B", "EMBED"),
     "diver-retriever-4b": ("Diver-Retriever-4B", "EMBED"),
     "diver-retriever-0.6b": ("Diver-Retriever-0.6B", "EMBED"),
