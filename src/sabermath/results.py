@@ -83,30 +83,6 @@ def report_of(payload: dict) -> tuple[str | None, dict | None]:
     return model_key, reports[model_key]
 
 
-# Canonical-protocol runs that carry no stamp to prove it.
-#
-# The runner writes the protocol into the report's `prompt` block, and the
-# tables show a row only if that block says "canonical" - the gate that keeps
-# pre-2026-08-25 numbers out. An early p0 run wrote no `prompt` block at all,
-# because p0 has no instruction to record, so three production runs are
-# indistinguishable from a pre-protocol one by their own metadata and were
-# silently dropped from every generated table.
-#
-# They are canonical, and each entry says how that is known:
-#   - reason-embed-qwen3-8b is the control. Its unstamped file and its later
-#     stamped __p0 twin have IDENTICAL per-query nDCG on statement-full, so an
-#     unstamped file of this generation is the same computation, not an older
-#     one. (It needs no entry here: the stamped twin wins on its own.)
-#   - the two below come from the same sweep directory as that control and as
-#     retro-star-32b, whose files from that directory ARE stamped canonical,
-#     and their own p1-p3 arms are stamped canonical.
-#   - rank1-7b's p0 is documented as the current protocol in the header of
-#     results/tables/RESULTS_rank1_reasonir_confidence_intervals.md.
-#
-# Each one reproduces its published statement-full score exactly (0.738,
-# 0.664, 0.552). Re-running any of them under the current runner replaces the
-# evidence with a stamp; the entry can then go. Three runs, four filenames:
-# rank1-7b has both a bare and a __p0 copy, and they must rank alike.
 PRE_STAMP_CANONICAL_RUNS = frozenset(
     {
         "reason-rewriter-reason-embed-8b.json",

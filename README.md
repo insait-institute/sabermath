@@ -105,7 +105,7 @@ python scripts/run_experiments.py --models rank1-7b --task statement-full
 # smoke test on 20 random queries before committing to a full run
 python scripts/run_experiments.py --models rank1-32b --n 20
 
-# the instruction ablation: four prompt arms, sharing one loaded model
+# the instruction ablation: four instructions, sharing one loaded model
 python scripts/run_experiments.py --prompts p0 p1 p2 p3
 ```
 
@@ -126,7 +126,7 @@ all:
 
 | Endpoint | Experiment | Write-up |
 |---|---|---|
-| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms | [evaluation](docs/experiment-evaluation.md), [instructions](docs/experiment-instructions.md) |
+| `scripts/run_experiments.py` | nDCG evaluation: main tables and the instructions | [evaluation](docs/experiment-evaluation.md), [instructions](docs/experiment-instructions.md) |
 | `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | [dedup](docs/experiment-dedup.md) |
 | `scripts/run_timing.py` | Per-query latency on production backends | [timing](docs/experiment-timing.md), [latency](docs/experiment-latency.md) |
 | `scripts/report_experiments.py` | Regenerates every table into `results/tables/` | [overview](docs/experiments-overview.md) |
@@ -188,7 +188,7 @@ environment that model family needs.
 | `results/dedup/` | Deduplication rankings |
 | `results/confidence/` | Bootstrap confidence intervals |
 | `results/rescaled/`, `results/rescaling/` | Relevance-rescaling robustness |
-| `results/math_vs_word/` | Similarity dumps, figures, and the per-arm table |
+| `results/math_vs_word/` | Similarity dumps, figures, and the per-instruction table |
 | `results/latency/` | Latency-vs-quality figure data |
 | `results/diagnostics/` | Backend-equivalence verdicts |
 | `results/tables/` | Generated tables |

@@ -410,7 +410,7 @@ INSTRUCTION_EXCLUDED = {
         "query as more query terms - and unlike its two lexical siblings it "
         "has no pathology that makes the result uninterpretable, so it ran "
         "and scored 0.4165 -> 0.3568/0.3630/0.3881 on statement-full. "
-        "Reporting one lexical baseline with arms and two without is a "
+        "Reporting one lexical baseline with instructions and two without is a "
         "harness accident, not a distinction, so all three are now excluded "
         "together and the runs were deleted"
     ),

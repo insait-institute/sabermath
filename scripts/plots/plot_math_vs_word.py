@@ -20,14 +20,14 @@ from sabermath.figures import (
 from sabermath.math_vs_word.sim_helpers import get_math_words_tokens
 from sabermath.math_vs_word import PLOTS_DIR, SIMILARITIES_DIR
 from sabermath.math_vs_word.aggregate import (
-    BASELINE_ARM,
+    BASELINE_INSTRUCTION,
     DOMAIN_ORDER,
     GROUP_NAMES,
     aggregate_math_vs_words,
     build_id_to_domain,
     get_first_domain,
     load_similarity_content,
-    normalize_arm,
+    normalize_instruction,
 )
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
@@ -61,20 +61,14 @@ def main(argv=None) -> None:
     parser.add_argument(
         "--instruction",
         default=None,
-        help="Plot the instructed similarity files instead of the plain "
-        "baseline ones - e.g. --instruction 1 (or p1) reads "
-        "similarities/<model>__p1.json instead of similarities/<model>.json. "
-        "Accepts 1/2/3 or p1/p2/p3. jaccard/tf-idf/approach0 have no "
-        "instructed variant (see load_models.py's instruction-exclusion "
-        "reasons) - those fall back to their plain baseline file with a "
-        "printed notice rather than erroring the whole plot.",
+        help="Plot the instructed similarity files"
     )
 
     args = parser.parse_args(argv)
     config_file = args.config_file
 
-    ARM = normalize_arm(args.instruction)
-    INSTRUCTION_SUFFIX = None if ARM == BASELINE_ARM else ARM
+    INSTRUCTION = normalize_instruction(args.instruction)
+    INSTRUCTION_SUFFIX = None if INSTRUCTION == BASELINE_INSTRUCTION else INSTRUCTION
 
     SELECTED_MODEL_IDS = ALL_MODEL_IDS if args.all else MODEL_IDS
     PLOT_MODEL_IDS = SELECTED_MODEL_IDS + [MATH_TOKEN_RATIO_MODEL_ID]
@@ -408,7 +402,7 @@ def main(argv=None) -> None:
 
     contents_by_model = {
         model_id: load_similarity_content(
-            model_id, ARM, SIMILARITIES_DIR, baseline_fallback=True
+            model_id, INSTRUCTION, SIMILARITIES_DIR, baseline_fallback=True
         )
         for model_id in SELECTED_MODEL_IDS
     }

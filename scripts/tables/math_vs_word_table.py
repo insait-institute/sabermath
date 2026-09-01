@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Equations vs. prose, per instruction arm.
+"""Equations vs. prose, per instruction.
 
-For every method and every instruction arm, the share of targets whose
+For every method and every instruction, the share of targets whose
 equation-only representation scores closer to the target's five most relevant
 candidates than its word-only representation does. The figure
 (`scripts/plots/plot_math_vs_word.py`) plots this per domain; this prints it.
@@ -28,11 +28,11 @@ import yaml
 from sabermath.figures import DEFAULT_MODEL_DISPLAY_NAMES
 from sabermath.math_vs_word import SIMILARITIES_DIR
 from sabermath.math_vs_word.aggregate import (
-    ARMS,
+    INSTRUCTIONS,
     DOMAIN_ORDER,
     NON_EMBEDDING_METHODS,
     aggregate_math_vs_words,
-    arms_on_disk,
+    instructions_on_disk,
     build_id_to_domain,
     load_similarity_content,
 )
@@ -45,10 +45,10 @@ DEFAULT_OUT_MD = Path("results/tables/RESULTS_math_vs_word.md")
 DEFAULT_OUT_CSV = Path("results/math_vs_word/results_table.csv")
 DEFAULT_OUT_TEX = Path("results/tables/math_vs_word_instructions.tex")
 
-ARM_LABELS = {"p0": "No Instr.", "p1": "I1", "p2": "I2", "p3": "I3"}
+INSTRUCTION_LABELS = {"p0": "No Instr.", "p1": "I1", "p2": "I2", "p3": "I3"}
 
 CSV_FIELDS = (
-    ["method", "arm", "n_targets", "ties_skipped", "pct_math_gt_words_All"]
+    ["method", "instruction", "n_targets", "ties_skipped", "pct_math_gt_words_All"]
     + [f"pct_{domain}" for domain in DOMAIN_ORDER]
     + ["mean_pr_full", "mean_pr_math", "mean_pr_text"]
 )
@@ -64,7 +64,7 @@ representation is - the quantity plotted per domain in the math-vs-word
 figure. Higher means the method leans on notation; lower means it leans on
 prose.
 
-Arms are the instruction prompts of docs/experiment-instructions.md, applied
+Instructions are the instruction prompts of docs/experiment-instructions.md, applied
 to the query only. p0 (no instruction, full vendor input envelope) is stored
 unsuffixed, so `<method>.json` and `<method>__p0.json` are the same run.
 
@@ -88,12 +88,12 @@ def fmt_pct(value: float | None) -> str:
 
 
 def collect(sim_dir: Path, methods: list[str], id_to_domain=None) -> dict:
-    """(method, arm) -> MathVsWordStats, for every arm present on disk."""
+    """(method, instruction) -> MathVsWordStats, for every instruction present on disk."""
     stats = {}
-    for model_id, arms in arms_on_disk(methods, sim_dir).items():
-        for arm in arms:
-            content = load_similarity_content(model_id, arm, sim_dir)
-            stats[(model_id, arm)] = aggregate_math_vs_words(
+    for model_id, instructions in instructions_on_disk(methods, sim_dir).items():
+        for instruction in instructions:
+            content = load_similarity_content(model_id, instruction, sim_dir)
+            stats[(model_id, instruction)] = aggregate_math_vs_words(
                 content, model_id=model_id, id_to_domain=id_to_domain
             )
     return stats
@@ -105,7 +105,7 @@ def ordered_methods(stats: dict, methods: list[str]) -> list[str]:
         model_id
         for model_id in methods
         if model_id not in NON_EMBEDDING_METHODS
-        and any((model_id, arm) in stats for arm in ARMS)
+        and any((model_id, instruction) in stats for instruction in INSTRUCTIONS)
     ]
     return sorted(
         rows,
@@ -120,23 +120,23 @@ def ordered_methods(stats: dict, methods: list[str]) -> list[str]:
 def markdown(stats: dict, ordered: list[str], missing: list[str]) -> str:
     body = [
         HEADER_NOTE,
-        "# Math vs. words, by instruction arm",
+        "# Math vs. words, by instruction",
         "",
         "Percentage of targets where the equation-only representation is more "
         "similar to the relevant candidates than the word-only representation "
         "(M>W, all domains).",
         "",
-        "| Model | " + " | ".join(ARM_LABELS[arm] for arm in ARMS) + " |",
-        "|---|" + "|".join("---" for _ in ARMS) + "|",
+        "| Model | " + " | ".join(INSTRUCTION_LABELS[instruction] for instruction in INSTRUCTIONS) + " |",
+        "|---|" + "|".join("---" for _ in INSTRUCTIONS) + "|",
     ]
     for model_id in ordered:
         cells = [
             fmt_pct(
-                stats[(model_id, arm)].percentages["All"]
-                if (model_id, arm) in stats
+                stats[(model_id, instruction)].percentages["All"]
+                if (model_id, instruction) in stats
                 else None
             )
-            for arm in ARMS
+            for instruction in INSTRUCTIONS
         ]
         body.append(f"| {display_name(model_id)} | " + " | ".join(cells) + " |")
 
@@ -157,8 +157,8 @@ def markdown(stats: dict, ordered: list[str], missing: list[str]) -> str:
         body += [f"- {model_id}" for model_id in missing]
 
     ties = sorted(
-        (model_id, arm, entry.ties_skipped)
-        for (model_id, arm), entry in stats.items()
+        (model_id, instruction, entry.ties_skipped)
+        for (model_id, instruction), entry in stats.items()
         if entry.ties_skipped
     )
     if ties:
@@ -170,11 +170,11 @@ def markdown(stats: dict, ordered: list[str], missing: list[str]) -> str:
             "representations. Only the systems that quantise or rewrite can "
             "produce one; anywhere else it raises.",
             "",
-            "| Model | Arm | Ties |",
+            "| Model | Instruction | Ties |",
             "|---|---|---|",
         ]
-        for model_id, arm, n in ties:
-            body.append(f"| {display_name(model_id)} | {arm} | {n} |")
+        for model_id, instruction, n in ties:
+            body.append(f"| {display_name(model_id)} | {instruction} | {n} |")
 
     return "\n".join(body) + "\n"
 
@@ -182,19 +182,19 @@ def markdown(stats: dict, ordered: list[str], missing: list[str]) -> str:
 def latex(stats: dict, ordered: list[str]) -> str:
     lines = [
         r"% Generated by scripts/tables/math_vs_word_table.py.",
-        r"\begin{tabular}{l" + "r" * len(ARMS) + "}",
+        r"\begin{tabular}{l" + "r" * len(INSTRUCTIONS) + "}",
         r"\toprule",
-        "Model & " + " & ".join(ARM_LABELS[arm] for arm in ARMS) + r" \\",
+        "Model & " + " & ".join(INSTRUCTION_LABELS[instruction] for instruction in INSTRUCTIONS) + r" \\",
         r"\midrule",
     ]
     for model_id in ordered:
         cells = [
             fmt_pct(
-                stats[(model_id, arm)].percentages["All"]
-                if (model_id, arm) in stats
+                stats[(model_id, instruction)].percentages["All"]
+                if (model_id, instruction) in stats
                 else None
             )
-            for arm in ARMS
+            for instruction in INSTRUCTIONS
         ]
         name = display_name(model_id).replace("&", r"\&")
         lines.append(f"{name} & " + " & ".join(cells) + r" \\")
@@ -207,10 +207,10 @@ def write_csv(stats: dict, path: Path) -> None:
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
-        for (model_id, arm), entry in sorted(stats.items()):
+        for (model_id, instruction), entry in sorted(stats.items()):
             row = {
                 "method": model_id,
-                "arm": arm,
+                "instruction": instruction,
                 "n_targets": entry.n_targets,
                 "ties_skipped": entry.ties_skipped,
                 "pct_math_gt_words_All": round(entry.percentages["All"], 2),
@@ -252,7 +252,7 @@ def main(argv=None) -> None:
 
     methods = args.methods or all_methods()
 
-    present = arms_on_disk(methods, args.sim_dir)
+    present = instructions_on_disk(methods, args.sim_dir)
     if not present:
         raise SystemExit(
             f"No similarity files in {args.sim_dir} - run "
@@ -264,8 +264,8 @@ def main(argv=None) -> None:
         config = yaml.safe_load(args.config_file.read_text()) or {}
         targets_dataset = config["hf_datasets"]["targets_maths_words_fixed"]
         all_content_ids = set()
-        for model_id, arms in present.items():
-            content = load_similarity_content(model_id, arms[0], args.sim_dir)
+        for model_id, instructions in present.items():
+            content = load_similarity_content(model_id, instructions[0], args.sim_dir)
             all_content_ids.update(str(target_id) for target_id in content)
         id_to_domain = build_id_to_domain(
             all_content_ids=all_content_ids,
@@ -287,12 +287,12 @@ def main(argv=None) -> None:
     write_csv(stats, args.out_csv)
     print(f"[+] Wrote {args.out_csv}")
 
-    arm_counts = {
-        arm: sum(1 for (_, cell_arm) in stats if cell_arm == arm) for arm in ARMS
+    instruction_counts = {
+        instruction: sum(1 for (_, cell_instruction) in stats if cell_instruction == instruction) for instruction in INSTRUCTIONS
     }
     print(
         f"[+] {len(present)} methods, "
-        + ", ".join(f"{n} {arm}" for arm, n in arm_counts.items())
+        + ", ".join(f"{n} {instruction}" for instruction, n in instruction_counts.items())
         + (" (per-domain columns skipped)" if args.overall_only else "")
     )
     if missing:

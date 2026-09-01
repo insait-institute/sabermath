@@ -23,8 +23,8 @@ FULL_KEY = "pr_full_vs_candidates"
 MATH_KEY = "pr_math_vs_candidates"
 TEXT_KEY = "pr_text_vs_candidates"
 
-ARMS = ["p0", "p1", "p2", "p3"]
-BASELINE_ARM = "p0"
+INSTRUCTIONS = ["p0", "p1", "p2", "p3"]
+BASELINE_INSTRUCTION = "p0"
 
 NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
 
@@ -38,16 +38,16 @@ MODELS_WITH_EXPECTED_TIES = {
 }
 
 
-def normalize_arm(value: str | None) -> str:
+def normalize_instruction(value: str | None) -> str:
     """`None`/`0`/`p0` -> "p0"; `1`/`p1` -> "p1". Anything else raises."""
     if value is None:
-        return BASELINE_ARM
+        return BASELINE_INSTRUCTION
     key = str(value).strip().lower()
     if not key.startswith("p"):
         key = f"p{key}"
-    if key not in ARMS:
+    if key not in INSTRUCTIONS:
         raise ValueError(
-            f"arm must be one of {ARMS} (or 0/1/2/3), got {value!r}"
+            f"instruction must be one of {INSTRUCTIONS} (or 0/1/2/3), got {value!r}"
         )
     return key
 
@@ -58,28 +58,28 @@ def file_stem(model_id: str) -> str:
 
 def similarity_path(
     model_id: str,
-    arm: str | None = None,
+    instruction: str | None = None,
     similarities_dir: Path = SIMILARITIES_DIR,
 ) -> Path:
-    """Where this (method, arm) is stored. p0 has no suffix."""
-    arm = normalize_arm(arm)
+    """Where this (method, instruction) is stored. p0 has no suffix."""
+    instruction = normalize_instruction(instruction)
     stem = file_stem(model_id)
-    if arm == BASELINE_ARM:
+    if instruction == BASELINE_INSTRUCTION:
         return Path(similarities_dir) / f"{stem}.json"
-    return Path(similarities_dir) / f"{stem}__{arm}.json"
+    return Path(similarities_dir) / f"{stem}__{instruction}.json"
 
 
 def load_similarity_content(
     model_id: str,
-    arm: str | None = None,
+    instruction: str | None = None,
     similarities_dir: Path = SIMILARITIES_DIR,
     *,
     baseline_fallback: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    path = similarity_path(model_id, arm, similarities_dir)
+    path = similarity_path(model_id, instruction, similarities_dir)
 
     if not path.exists() and baseline_fallback:
-        baseline = similarity_path(model_id, BASELINE_ARM, similarities_dir)
+        baseline = similarity_path(model_id, BASELINE_INSTRUCTION, similarities_dir)
         if baseline.exists():
             print(
                 f"[~] No {path.name} for {model_id!r} - falling back to its "
@@ -96,19 +96,19 @@ def load_similarity_content(
         return json.load(f)
 
 
-def arms_on_disk(
+def instructions_on_disk(
     model_ids: Iterable[str],
     similarities_dir: Path = SIMILARITIES_DIR,
 ) -> dict[str, list[str]]:
     found = {}
     for model_id in model_ids:
-        arms = [
-            arm
-            for arm in ARMS
-            if similarity_path(model_id, arm, similarities_dir).exists()
+        instructions = [
+            instruction
+            for instruction in INSTRUCTIONS
+            if similarity_path(model_id, instruction, similarities_dir).exists()
         ]
-        if arms:
-            found[model_id] = arms
+        if instructions:
+            found[model_id] = instructions
     return found
 
 

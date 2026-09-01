@@ -20,10 +20,10 @@ def main(argv=None) -> None:
     parser.add_argument(
         "--instruction",
         default=None,
-        help="Instruction-ablation arm to run (p0/p1/p2/p3/pm). Omit for the "
-        "default arm, which is p0 - no instruction TEXT, but still the "
+        help="Instruction to run (p0/p1/p2/p3/pm). Omit for the "
+        "default instruction, which is p0 - no instruction TEXT, but still the "
         "model's full vendor input envelope, exactly as run_dedup.py runs it. "
-        "An instructed arm writes similarities/<method>__<arm>.json so it "
+        "An instructed instruction writes similarities/<method>__<instruction>.json so it "
         "never overwrites the default file. Embedding methods only.",
     )
     parser.add_argument(
@@ -32,7 +32,7 @@ def main(argv=None) -> None:
         default=None,
         help="Split the targets into N STRIDED shards (i %% N == shard), the "
         "same split run_experiments.py's --query-shards uses. Each shard writes "
-        "similarities/<method>[__<arm>]__shard<i>of<N>.json and never touches "
+        "similarities/<method>[__<instruction>]__shard<i>of<N>.json and never touches "
         "another shard's file, so shards run concurrently - necessary here "
         "because sim_embeddings rewrites its whole dict after every target "
         "and two writers on one path clobber each other. Stitch them with "

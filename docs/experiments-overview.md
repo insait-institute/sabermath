@@ -14,7 +14,7 @@ on its own. Most models additionally need a specific conda environment — see
 
 | Script | Produces | Written to |
 |---|---|---|
-| `scripts/run_experiments.py` | nDCG evaluation: main tables and instruction arms | `results/evaluation/` |
+| `scripts/run_experiments.py` | nDCG evaluation: main tables and the instructions | `results/evaluation/` |
 | `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | `results/dedup/` |
 | `scripts/run_timing.py` | Per-query latency on production backends | `results/timing/` |
 | `scripts/report_experiments.py` | Every table | `results/tables/` |
@@ -29,7 +29,7 @@ read. Each script's `--help` is the authoritative reference for its flags.
 | Document | Experiment |
 |---|---|
 | [experiment-evaluation.md](experiment-evaluation.md) | nDCG evaluation: environments, sharding, resuming, output naming |
-| [experiment-instructions.md](experiment-instructions.md) | The four instruction-prompt arms |
+| [experiment-instructions.md](experiment-instructions.md) | The four instruction prompts |
 | [experiment-dedup.md](experiment-dedup.md) | Where a rephrased copy of a query's own problem ranks |
 | [experiment-rescaling.md](experiment-rescaling.md) | Replaying rankings under a different gain or relevance scale |
 | [experiment-confidence-intervals.md](experiment-confidence-intervals.md) | Bootstrap confidence intervals |

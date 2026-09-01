@@ -130,7 +130,7 @@ def report_rescaling(out_dir: Path) -> bool:
 
 def report_math_vs_word(out_dir: Path) -> bool:
     return _run(
-        "math-vs-word table (equations vs prose, per instruction arm)",
+        "math-vs-word table (equations vs prose, per instruction)",
         "scripts/tables/math_vs_word_table.py",
         ["--out-md", str(out_dir / "RESULTS_math_vs_word.md"),
          "--out-tex", str(out_dir / "math_vs_word_instructions.tex")],

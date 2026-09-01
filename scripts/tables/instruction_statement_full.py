@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUNS = ROOT / "results" / "evaluation"
 DEFAULT_OUT = ROOT / "results" / "tables"
 TASK = "statement-full"
-ARMS = ["p0", "p1", "p2", "p3"]
+INSTRUCTIONS = ["p0", "p1", "p2", "p3"]
 NAME = re.compile(r"^([a-z0-9._-]+?)(?:__(p[0-3]|pm))?(?:__shard(\d+)of(\d+))?$")
 
 TABLE = [
@@ -68,7 +68,7 @@ TABLE = [
 
 EXCLUDED = {
     "approach0": "its segfault skip-list matches an MD5 of the raw query text, which any rewrite defeats",
-    "bm25": "no instruction mechanism; the arms it did have were dropped so the lexical rows are treated alike",
+    "bm25": "no instruction mechanism; the instructions it did have were dropped so the lexical rows are treated alike",
     "jaccard": "instruction tokens inflate the query token-set union, moving every score monotonically",
     "tf-idf": "its vocabulary is fitted on documents only and cosine dilutes real query terms",
 }
@@ -80,7 +80,7 @@ def collect(runs_dir: Path):
         m = NAME.match(path.stem)
         if not m:
             continue
-        arm, shard, nshards = m.group(2) or "p0", m.group(3), m.group(4)
+        instruction, shard, nshards = m.group(2) or "p0", m.group(3), m.group(4)
         try:
             payload = json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
@@ -95,43 +95,43 @@ def collect(runs_dir: Path):
             entry = (scored, report, path.name)
             rank = 0 if m.group(2) else 1
             if shard is None:
-                prev = whole.get((key, arm))
+                prev = whole.get((key, instruction))
                 if prev is None or rank < prev[0]:
-                    whole[(key, arm)] = (rank, entry)
+                    whole[(key, instruction)] = (rank, entry)
             else:
-                shards[(key, arm, int(nshards))].setdefault(int(shard), entry)
+                shards[(key, instruction, int(nshards))].setdefault(int(shard), entry)
 
     cells, rejected = {}, []
 
-    def verify(key, arm, report, n, source):
+    def verify(key, instruction, report, n, source):
         prompt = report.get("prompt") or {}
         if n != 1000:
-            rejected.append((key, arm, f"{n}/1000 queries scored", source))
+            rejected.append((key, instruction, f"{n}/1000 queries scored", source))
             return False
         if report.get("k") != 10 or report.get("dcg_variant") != "exponent":
-            rejected.append((key, arm, "not nDCG@10 with exponential gain", source))
+            rejected.append((key, instruction, "not nDCG@10 with exponential gain", source))
             return False
-        if arm != "p0" and prompt.get("key") != arm:
-            rejected.append((key, arm, f"file records prompt {prompt.get('key')!r}", source))
+        if instruction != "p0" and prompt.get("key") != instruction:
+            rejected.append((key, instruction, f"file records prompt {prompt.get('key')!r}", source))
             return False
         return True
 
-    for (key, arm), (_rank, (scored, report, source)) in whole.items():
-        if verify(key, arm, report, len(scored), source):
+    for (key, instruction), (_rank, (scored, report, source)) in whole.items():
+        if verify(key, instruction, report, len(scored), source):
             task = next(
                 (t for t in report.get("tasks", []) if t["task"] == TASK), None
             )
             score = task["ndcg_at_k"] if task else statistics.fmean(scored)
-            cells[(key, arm)] = (score, source)
+            cells[(key, instruction)] = (score, source)
 
-    for (key, arm, nshards), parts in sorted(shards.items()):
-        if (key, arm) in cells or len(parts) != nshards:
+    for (key, instruction, nshards), parts in sorted(shards.items()):
+        if (key, instruction) in cells or len(parts) != nshards:
             continue
         pooled = [v for i in sorted(parts) for v in parts[i][0]]
         report = parts[min(parts)][1]
-        source = f"{key}__{arm}__shard*of{nshards} ({nshards} shards)"
-        if verify(key, arm, report, len(pooled), source):
-            cells[(key, arm)] = (statistics.fmean(pooled), source)
+        source = f"{key}__{instruction}__shard*of{nshards} ({nshards} shards)"
+        if verify(key, instruction, report, len(pooled), source):
+            cells[(key, instruction)] = (statistics.fmean(pooled), source)
 
     return cells, rejected
 
@@ -140,8 +140,8 @@ def rows(cells):
     out = []
     for name, key, code in TABLE:
         base = cells.get((key, "p0"))
-        arms = [cells.get((key, a)) for a in ARMS[1:]]
-        out.append((name, key, code, base, arms))
+        instructions = [cells.get((key, a)) for a in INSTRUCTIONS[1:]]
+        out.append((name, key, code, base, instructions))
     return sorted(out, key=lambda r: -(r[3][0] if r[3] else 0))
 
 
@@ -153,34 +153,34 @@ def markdown(cells, rejected, ordered):
         "",
         "nDCG@10 over all 1000 queries, canonical protocol. `p0` is the",
         "no-instruction baseline; the parenthesised value is the change from it.",
-        "`--` marks a model with no run for that arm. Rows are ordered by `p0`.",
+        "`--` marks a model with no run for that instruction. Rows are ordered by `p0`.",
         "",
         "| Model | Type | p0 (none) | p1 | p2 | p3 | best |",
         "|---|---|---|---|---|---|---|",
     ]
-    for name, key, code, base, arms in ordered:
+    for name, key, code, base, instructions in ordered:
         if base is None:
             continue
         cells_txt = [f"{base[0]:.4f}"]
         best, best_name = base[0], "p0"
-        for arm, got in zip(ARMS[1:], arms):
+        for instruction, got in zip(INSTRUCTIONS[1:], instructions):
             if got is None:
                 cells_txt.append("--")
                 continue
             cells_txt.append(f"{got[0]:.4f} ({got[0] - base[0]:+.4f})")
             if got[0] > best:
-                best, best_name = got[0], arm
+                best, best_name = got[0], instruction
         md.append(f"| {name} | {code} | " + " | ".join(cells_txt) + f" | {best_name} |")
 
-    md += ["", "## Rows with no instruction arms", ""]
+    md += ["", "## Rows with no instructions", ""]
     for key, why in sorted(EXCLUDED.items()):
         name = next(n for n, k, _ in TABLE if k == key)
         md.append(f"- **{name}** - {why}.")
 
     if rejected:
         md += ["", "## Incomplete or unverifiable runs (excluded from the table)", ""]
-        for key, arm, why, source in sorted(rejected):
-            md.append(f"- `{key}` {arm}: {why} (`{source}`)")
+        for key, instruction, why, source in sorted(rejected):
+            md.append(f"- `{key}` {instruction}: {why} (`{source}`)")
 
     extra = sorted({k for k, _ in cells} - {k for _, k, _ in TABLE})
     if extra:
@@ -188,7 +188,7 @@ def markdown(cells, rejected, ordered):
             "",
             "## Also in runs/, not in the paper's table",
             "",
-            "Ablation arms and size siblings that were run but are not rows of the",
+            "Ablation instructions and size siblings that were run but are not rows of the",
             "results table: " + ", ".join(f"`{k}`" for k in extra) + ".",
         ]
     md.append("")
@@ -205,8 +205,8 @@ def latex(ordered):
         "    \\caption{Effect of a task instruction on \\bench{} (statement-full), "
         "nDCG@10 over all 1000 queries. \\texttt{p0} is the no-instruction "
         "baseline and \\texttt{p1}--\\texttt{p3} prepend one prompt to the query; "
-        "``--'' marks a model with no run for that arm. The four lexical and "
-        "symbolic rows have no instruction mechanism and are reported without arms.}",
+        "``--'' marks a model with no run for that instruction. The four lexical and "
+        "symbolic rows have no instruction mechanism and are reported without instructions.}",
         "    \\label{tab:instructions-statement-full}",
         "    \\renewcommand{\\arraystretch}{1.05}",
         "    \\setlength{\\tabcolsep}{4pt}",
@@ -219,12 +219,12 @@ def latex(ordered):
         " & \\multicolumn{1}{c}{p3} \\\\",
         "            \\midrule",
     ]
-    for name, key, code, base, arms in ordered:
+    for name, key, code, base, instructions in ordered:
         if base is None:
             continue
-        best = max([base[0]] + [g[0] for g in arms if g])
+        best = max([base[0]] + [g[0] for g in instructions if g])
         cells = [f"{base[0]:.3f}" if base[0] < best else f"\\mathbf{{{base[0]:.3f}}}"]
-        for got in arms:
+        for got in instructions:
             if got is None:
                 cells.append("\\text{---}")
             elif got[0] == best:
@@ -256,12 +256,12 @@ def main(argv=None):
         markdown(cells, rejected, ordered)
     )
     (args.out_dir / "statement_full_instructions.tex").write_text(latex(ordered))
-    shown = sum(1 for _, _, _, base, arms in ordered if base for g in arms if g)
-    print(f"[+] {len(cells)} verified cells; {len(ordered)} table rows, {shown} arm cells")
+    shown = sum(1 for _, _, _, base, instructions in ordered if base for g in instructions if g)
+    print(f"[+] {len(cells)} verified cells; {len(ordered)} table rows, {shown} instruction cells")
     if rejected:
         print(f"[!] {len(rejected)} run(s) excluded:")
-        for key, arm, why, source in sorted(rejected):
-            print(f"      {key} {arm}: {why}")
+        for key, instruction, why, source in sorted(rejected):
+            print(f"      {key} {instruction}: {why}")
     print(f"[+] wrote 2 files into {args.out_dir}")
 
 

@@ -53,22 +53,22 @@ words with no stop-word filtering.
 Long runs can be split with `--shards N --shard I` and reassembled with
 `python scripts/analysis/math_vs_word_merge.py`.
 
-### Instruction arms
+### Instructions
 
 ```bash
 python scripts/analysis/math_vs_word.py --method <MODEL_ID> --instruction p1
-python scripts/analysis/math_vs_word_coverage.py --arms p0 p1 p2 p3 --emit-commands
+python scripts/analysis/math_vs_word_coverage.py --instructions p0 p1 p2 p3 --emit-commands
 ```
 
-`p0` **is** the default arm: `<method>.json` and `<method>__p0.json` are the
+`p0` **is** the default instruction: `<method>.json` and `<method>__p0.json` are the
 same run. `--instruction` is refused for the four lexical methods, which are
-the control rows. `math_vs_word_coverage.py` reports which arms are missing
+the control rows. `math_vs_word_coverage.py` reports which instructions are missing
 and prints the command for each.
 
 ## Output
 
 ```
-results/math_vs_word/similarities/<method>[__<arm>].json
+results/math_vs_word/similarities/<method>[__<instruction>].json
 results/math_vs_word/similarities_baseline/<method>.json   # pre-envelope runs, kept for comparison
 results/math_vs_word/plots/*.pdf
 results/math_vs_word/results_table.csv
@@ -81,7 +81,7 @@ similarities: `pr_full_vs_candidates`, `pr_math_vs_candidates`,
 `pr_text_vs_candidates`.
 
 The figure gives, per domain and overall, how often equations beat words. The
-table gives one row per method and one column per arm (`No Instr.`, `I1`,
+table gives one row per method and one column per instruction (`No Instr.`, `I1`,
 `I2`, `I3`), best baseline first, with the lexical methods under "Instruction
 controls". `--overall-only` skips the per-domain CSV columns, which are the
 only part needing the targets dataset.

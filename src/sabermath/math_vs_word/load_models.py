@@ -3,24 +3,15 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-from sabermath.registry import RADER_BIENCODER_MODELS  # noqa: E402
-from sabermath.processors import SentenceTransformersProcessor  # noqa: E402
+from sabermath.registry import RADER_BIENCODER_MODELS 
+from sabermath.processors import SentenceTransformersProcessor
 from . import SIMILARITIES_DIR
 
 _NO_EXPERIMENT_KEY = {"microsoft/codebert-base"}
-
-# tensor_parallel_size. This module pins CUDA_VISIBLE_DEVICES=0 above, so
-# there is exactly one visible GPU and tp>1 is not expressible. One
-# math-vs-word method runs per invocation, on one GPU.
 _TENSOR_PARALLEL_SIZE = 1
-
-# Only read by the registry's inf-x-retriever builder, which is not in
-# ALLOWED_MODELS - but the processor builder takes it unconditionally.
 _SAVE_DIR = str(SIMILARITIES_DIR)
 
 
-# HF repo string -> the registry's short model key, built by inverting the
-# registry's own spec dicts rather than hand-maintaining a second roster.
 def _model_key_by_id() -> dict:
     from sabermath import registry as rr
 
@@ -46,10 +37,6 @@ def model_key_for(model_id: str) -> str:
         return model_id
     key = _model_key_by_id().get(model_id)
     if key is None:
-        # CUSTOM_MODEL_BUILDERS/API_MODELS entries have no "model" field to
-        # invert, but their short key is the repo's last path component
-        # lowercased. Accepted only when it resolves to a real key, so a model
-        # genuinely outside the table still raises.
         candidate = model_id.rsplit("/", 1)[-1].lower()
         if candidate in rr.ALL_MODEL_KEYS:
             return candidate
@@ -137,7 +124,7 @@ def get_model(
     protocol = "canonical"
     print(
         f"Loading {MODEL_ID} as the registry model key {model_key!r} "
-        f"(arm {key}, {protocol} protocol) via "
+        f"(instruction {key}, {protocol} protocol) via "
         f"the registry's processor builder..."
     )
     return rr.build_processor(
@@ -151,8 +138,8 @@ ALLOWED_MODELS = [
     "BAAI/bge-m3",
     "tencent/KaLM-Embedding-Gemma3-12B-2511",
     "google/embeddinggemma-300m",
-    "google-bert/bert-base-uncased",  # Standard BERT
-    "FacebookAI/roberta-base",  # Standard RoBERTa
+    "google-bert/bert-base-uncased",  
+    "FacebookAI/roberta-base",  
     "microsoft/codebert-base",
     "google/gemini-embedding-001",
     "google/gemini-embedding-2",
@@ -164,47 +151,38 @@ ALLOWED_MODELS = [
     "jinaai/jina-embeddings-v5-text-nano",
 ]
 
-# The rest of the paper's model table. Treated identically to the list above;
-# how each is built and scored is decided by the registry, via model_key_for().
 ADDITIONAL_MODELS = [
-    # EMBED
-    "hanhainebula/reason-embed-qwen3-8b-0928",  # Reason-Embed-Qwen3-8B
+    "hanhainebula/reason-embed-qwen3-8b-0928",
     "AQ-MedAI/Diver-Retriever-4B",
     "AQ-MedAI/Diver-Retriever-0.6B",
-    "infly/inf-retriever-v1-pro",  # INF-Retriever-v1-Pro
-    "reasonir/ReasonIR-8B",  # ReasonIR-8B
+    "infly/inf-retriever-v1-pro",
+    "reasonir/ReasonIR-8B", 
     RADER_BIENCODER_MODELS["rader-14b"],
     RADER_BIENCODER_MODELS["rader-7b"],
     RADER_BIENCODER_MODELS["rader-3b"],
-    "nvidia/llama-embed-nemotron-8b",  # LLaMA-Embed-Nemotron-8B
-    "intfloat/multilingual-e5-large",  # Multilingual-E5-Large
-    "jinaai/jina-embeddings-v5-text-small",  # Jina-v5-Text-Small
-    # API (OpenRouter - sabermath.registry.API_MODELS routes these)
+    "nvidia/llama-embed-nemotron-8b",
+    "intfloat/multilingual-e5-large",
+    "jinaai/jina-embeddings-v5-text-small",
     "text-embedding-3-large",
     "text-embedding-3-small",
-    # RERANK
-    "jhu-clsp/rank1-32b",  # Rank1-32B
-    "jhu-clsp/rank1-7b",  # Rank1-7B
-    "jhu-clsp/rank1-0.5b",  # Rank1-0.5B
+    "jhu-clsp/rank1-32b",
+    "jhu-clsp/rank1-7b", 
+    "jhu-clsp/rank1-0.5b",  
     "qwen3-reranker-8b",
     "qwen3-reranker-4b",
     "qwen3-reranker-0.6b",
     "splade-code-8b",
     "splade-code-0.6b",
-    "rader-reranker-7b",  # RaDeR-Reranker-7B
-    "diver-grouprank-32b",  # Diver-GroupRank-32B
-    "lightonai/GTE-ModernColBERT-v1",  # GTE-ModernColBERT
-    "lightonai/Reason-ModernColBERT",  # Reason-ModernColBERT
-    "inf-x-retriever",  # INF-X-Retriever
-    # The rewritten arm. Short-keyed because composed systems have no single
-    # repo to dispatch on. These put the instruction on the REWRITER only - do
-    # NOT substitute reason-rewriter-reason-embed-8b-instructed, which also
-    # instructs the encoder and is a different experiment.
-    "retro-star-32b",  # Retro*-Qwen3-32B
-    "retro-star-32b-rewritten",  # Retro*-Qwen3-32B on the rewritten query
-    "reason-rewriter-reason-embed-8b",  # ReasonEmbed-Qwen3-8B-rewritten
-    "reason-rewriter-reason-embed-llama-3.1-8b",  # ReasonEmbed-Llama-3.1-8B-rewritten
-    "hanhainebula/reason-embed-llama-3.1-8b-0928",  # ReasonEmbed-Llama-3.1-8B
+    "rader-reranker-7b", 
+    "diver-grouprank-32b",  
+    "lightonai/GTE-ModernColBERT-v1", 
+    "lightonai/Reason-ModernColBERT", 
+    "inf-x-retriever",
+    "retro-star-32b", 
+    "retro-star-32b-rewritten",
+    "reason-rewriter-reason-embed-8b",
+    "reason-rewriter-reason-embed-llama-3.1-8b", 
+    "hanhainebula/reason-embed-llama-3.1-8b-0928", 
 ]
 
 ALLOWED_MODELS = ALLOWED_MODELS + ADDITIONAL_MODELS

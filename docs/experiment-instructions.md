@@ -1,6 +1,6 @@
 # Instruction prompts
 
-Runs each model under four prompt arms and tabulates the change from the
+Runs each model under four instructions and tabulates the change from the
 no-instruction baseline. The runs go to `results/evaluation/` alongside every
 other nDCG run.
 
@@ -13,8 +13,8 @@ other nDCG run.
   | Key | Role |
   |---|---|
   | `p0` | no instruction — the baseline |
-  | `p1`, `p2`, `p3` | the three instruction arms |
-  | `pm` | the repo's production math instruction; a separate arm, not part of the ablation |
+  | `p1`, `p2`, `p3` | the three instructions |
+  | `pm` | the repo's production math instruction; a separate instruction, not part of the ablation |
 
 - Models with no instruction mechanism (`approach0`, `bm25`, `jaccard`,
   `tf-idf`) are listed in `INSTRUCTION_EXCLUDED` in
@@ -29,7 +29,7 @@ python scripts/run_experiments.py --models <key> --prompts p0 p1 p2 p3
 python scripts/report_experiments.py instructions instructions-statement-full
 ```
 
-Several arms in one invocation share the loaded model. Reporting needs no GPU
+Several instructions in one invocation share the loaded model. Reporting needs no GPU
 and no downloads.
 
 A 32B reranker will not finish 1000 queries in one sitting; run it sharded and
@@ -45,9 +45,9 @@ results/tables/RESULTS_instructions_statement_full.md
 results/tables/statement_full_instructions.tex
 ```
 
-`RESULTS_instructions.md` gives one row per model and one column per arm, with
+`RESULTS_instructions.md` gives one row per model and one column per instruction, with
 the parenthesised value being the change from that model's own `p0`.
-Instructable models and controls are separate blocks, and the `pm` arm has its
+Instructable models and controls are separate blocks, and the `pm` instruction has its
 own section.
 
 A cell appears only when all 1000 queries scored; a partial run is listed

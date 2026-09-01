@@ -13,7 +13,7 @@ def parse_shard(path: Path):
     if not m:
         raise SystemExit(
             f"{path.name} is not a shard file - expected "
-            "<method>[__<arm>]__shard<i>of<n>.json"
+            "<method>[__<instruction>]__shard<i>of<n>.json"
         )
     return m.group("stem"), int(m.group("i")), int(m.group("n"))
 
@@ -56,7 +56,7 @@ def main(argv=None) -> None:
         raise SystemExit(f"Mixed shard counts: {sorted(ns)}")
     stem, n = stems.pop(), ns.pop()
 
-    print(f"method/arm: {stem}   shards: {len(shards)} of {n}")
+    print(f"method/instruction: {stem}   shards: {len(shards)} of {n}")
 
     missing = [i for i in range(n) if i not in shards]
     if missing:

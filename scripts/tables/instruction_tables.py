@@ -246,17 +246,17 @@ def main(argv=None) -> None:
             body += block(cells, order(controls, main_task), args.prompts, slot)
             body += [""]
 
-    # ---- pm arm, where it exists ----
+    # ---- pm instruction, where it exists ----
     pm_models = sorted({k for (k, prompt) in cells if prompt == "pm"})
     if pm_models:
         body += [
-            "## The `pm` arm (Qwen3-Reranker only)",
+            "## The `pm` instruction (Qwen3-Reranker only)",
             "",
             "`pm` is this repo's own math-specific instruction, the one the",
             "PUBLISHED Qwen3-Reranker rows were produced with. It is reported",
             "separately because p0 for this family is the vendor's model-card",
             "default rather than an empty slot — that family's `<Instruct>`",
-            "field cannot be left empty — so `pm` is an ablation arm, not a",
+            "field cannot be left empty — so `pm` is an ablation instruction, not a",
             "baseline. See docs/experiment-instructions.md.",
             "",
         ]

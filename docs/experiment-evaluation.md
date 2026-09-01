@@ -27,7 +27,7 @@ python scripts/run_experiments.py --list                        # every model ke
 python scripts/run_experiments.py                               # every model, p0
 python scripts/run_experiments.py --models rank1-7b splade-code-8b
 python scripts/run_experiments.py --models rank1-32b --n 20     # 20-query smoke test
-python scripts/run_experiments.py --prompts p0 p1 p2 p3         # instruction arms
+python scripts/run_experiments.py --prompts p0 p1 p2 p3         # the four instructions
 ```
 
 `--models` defaults to every model in the registry, `--prompts` to `p0`.
@@ -73,7 +73,7 @@ Each run file holds `domains` and `reports.<model>` with:
 | Field | Contents |
 |---|---|
 | `model`, `processor`, `dcg_variant`, `k` | how it was scored |
-| `prompt` | the arm, its template and the applied input envelope |
+| `prompt` | the instruction, its template and the applied input envelope |
 | `tasks[]` | per task: `ndcg_at_k` and per-domain `branches[]` |
 | `ndcgs_by_task` | the per-query nDCG list the confidence intervals read |
 | `n_done` / `n_total` | **present only on an incomplete task** |

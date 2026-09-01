@@ -27,10 +27,10 @@ def envelope_for(method: str) -> dict | None:
     except Exception:
         return None
 
-def inspect(method: str, sim_dir: Path, arm: str | None = None) -> tuple[str, str]:
+def inspect(method: str, sim_dir: Path, instruction: str | None = None) -> tuple[str, str]:
     stem = method.replace("/", "_")
-    if arm:
-        stem = f"{stem}__{arm}"
+    if instruction:
+        stem = f"{stem}__{instruction}"
     path = sim_dir / f"{stem}.json"
     if not path.exists():
         return "missing", "no similarities file"
@@ -69,11 +69,11 @@ def main(argv=None) -> None:
         help="Print the calc_sims.py command for each incomplete method.",
     )
     parser.add_argument(
-        "--arms",
+        "--instructions",
         nargs="*",
         default=None,
-        help="Instruction-ablation arms to check as well (e.g. p0 p1 p2 p3). "
-        "Each is stored as similarities/<method>__<arm>.json. Only embedding "
+        help="Instructions to check as well (e.g. p0 p1 p2 p3). "
+        "Each is stored as similarities/<method>__<instruction>.json. Only embedding "
         "methods have these; the lexical methods are instruction controls.",
     )
     args = parser.parse_args(argv)
@@ -109,47 +109,47 @@ def main(argv=None) -> None:
                 f"--method {method!r}{force}"
             )
 
-    if args.arms:
+    if args.instructions:
         embedding_methods = [m for m in methods if m not in NON_EMBEDDING_METHODS]
         print(f"\n{'=' * 68}\nInstruction ablation: "
-              f"{len(embedding_methods)} embedding methods x {len(args.arms)} arms")
+              f"{len(embedding_methods)} embedding methods x {len(args.instructions)} instructions")
         reusable, to_run, unknown = [], [], []
-        for arm in args.arms:
+        for instruction in args.instructions:
             for method in embedding_methods:
-                status, _ = inspect(method, args.sim_dir, arm)
+                status, _ = inspect(method, args.sim_dir, instruction)
                 if status == "ok":
                     continue
-                # p0 is the default arm, so it is always a copy, never a run.
-                if arm == "p0":
+                # p0 is the default instruction, so it is always a copy, never a run.
+                if instruction == "p0":
                     if envelope_for(method) is None:
-                        unknown.append((method, arm))
+                        unknown.append((method, instruction))
                     else:
                         reusable.append(method)
                 else:
-                    to_run.append((method, arm))
+                    to_run.append((method, instruction))
 
         print(f"  needs a run : {len(to_run)}")
-        print(f"  p0 reusable : {len(reusable)}  (p0 IS the default arm - the "
+        print(f"  p0 reusable : {len(reusable)}  (p0 IS the default instruction - the "
               f"file already on disk is that run)")
         if unknown:
             print(f"  UNRESOLVED  : {len(unknown)}  (no registry model key - "
                   f"envelope unknown, so p0 cannot be assumed reusable)")
-            for method, arm in unknown:
-                print(f"      {method} / {arm}")
+            for method, instruction in unknown:
+                print(f"      {method} / {instruction}")
 
         if args.emit_commands:
             if reusable:
-                print("\n# p0 arms that are the default run under another name.")
+                print("\n# p0 instructions that are the default run under another name.")
                 print("# Copy rather than recompute.")
                 for method in sorted(set(reusable)):
                     stem = method.replace("/", "_")
                     print(f"cp similarities/{stem}.json similarities/{stem}__p0.json")
             if to_run:
-                print("\n# Arms that must actually run:")
-                for method, arm in to_run:
+                print("\n# Instructions that must actually run:")
+                for method, instruction in to_run:
                     print(
                         f"python scripts/analysis/math_vs_word.py "
-                        f"--method {method!r} --instruction {arm}"
+                        f"--method {method!r} --instruction {instruction}"
                     )
         broken = broken or to_run
 

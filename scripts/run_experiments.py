@@ -19,7 +19,7 @@ USAGE = """\
   # a subset
   python scripts/run_experiments.py --models rank1-7b qwen3-reranker-4b
 
-  # the instruction ablation: four prompt arms per model
+  # the instruction ablation: four instructions per model
   python scripts/run_experiments.py --prompts p0 p1 p2 p3
 
   # smoke test on 20 random queries before a multi-hour run
@@ -36,9 +36,7 @@ USAGE = """\
   # list what is available
   python scripts/run_experiments.py --list
 
-Four model families need their own conda environment and fail loudly in the
-wrong one: see docs/experiment-evaluation.md and scripts/envs/.
-"""
+Four model families need their own conda environment"""
 
 
 def _print_registry() -> None:
@@ -83,8 +81,8 @@ def main() -> None:
         nargs="+",
         choices=list(INSTRUCTIONS),
         default=["p0"],
-        help="Instruction arms to run (default: p0, i.e. no instruction). "
-        "Several arms in one invocation share the loaded model.",
+        help="Instructions to run (default: p0, i.e. no instruction). Several "
+        "instructions in one invocation share the loaded model.",
     )
     parser.add_argument(
         "--task",
