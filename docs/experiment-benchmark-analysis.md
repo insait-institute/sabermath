@@ -1,7 +1,6 @@
 # Dataset composition charts
 
-Sunburst charts of how the benchmark and its source corpus distribute across
-mathematical domains and subdomains.
+Sunburst charts of how the benchmark and its source corpus distribute across mathematical domains and subdomains.
 
 ## Prerequisites
 

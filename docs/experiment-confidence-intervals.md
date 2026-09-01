@@ -1,7 +1,6 @@
 # Confidence intervals
 
 Bootstrap confidence intervals over the per-query nDCGs a run already stored.
-Writes `results/confidence/`.
 
 ## Prerequisites
 

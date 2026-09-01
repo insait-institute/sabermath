@@ -46,9 +46,9 @@ python scripts/run_experiments.py --models rank1-32b --task statement-full \
 python scripts/run_experiments.py --models rank1-32b --query-shards 4 --query-shard 0
 
 # stitch the shards back
-python scripts/run_experiments.py --merge-shards                 # scan results/evaluation
-python scripts/run_experiments.py --merge-shards <part>.json ... # an explicit group
-python scripts/run_experiments.py --merge-shards --dry-run       # report, write nothing
+python scripts/run_experiments.py --merge-shards                
+python scripts/run_experiments.py --merge-shards <part>.json ... 
+python scripts/run_experiments.py --merge-shards --dry-run      
 ```
 
 `--merge-shards` refuses to write when queries are missing from every part;

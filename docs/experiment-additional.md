@@ -1,7 +1,6 @@
 # Construction-pipeline checks
 
-Two checks on how the benchmark's relevance scores were produced. The pipeline
-they analyse is in `build_benchmark/`.
+Two checks on how the benchmark's relevance scores were produced.
 
 ## Prerequisites
 
