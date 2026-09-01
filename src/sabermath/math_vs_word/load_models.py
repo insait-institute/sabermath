@@ -1,9 +1,4 @@
-import os
-
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-from sabermath.registry import RADER_BIENCODER_MODELS 
+from sabermath.registry import RADER_BIENCODER_MODELS
 from sabermath.processors import SentenceTransformersProcessor
 from . import SIMILARITIES_DIR
 from .models import ALLOWED_MODELS

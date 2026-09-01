@@ -34,8 +34,14 @@ python -m pip install -e ".[apis]"
 # Lexical baselines: TF-IDF, BM25, Jaccard, Approach Zero
 python -m pip install -e ".[lexical]"
 
+# Custom-scoring rerankers: rank1, Qwen3-Reranker, ColBERT, ReasonIR, SPLADE
+python -m pip install -e ".[rerankers]"
+
+# The analyses and figures under scripts/analysis/ and scripts/plots/
+python -m pip install -e ".[analysis]"
+
 # Everything
-python -m pip install -e ".[vllm,apis,lexical]"
+python -m pip install -e ".[vllm,apis,lexical,rerankers,analysis]"
 ```
 
 For API-based models, set the relevant API key before running evaluation:
@@ -146,10 +152,12 @@ See `build_benchmark/README.md` for the exact environment variables, commands, H
 | `src/sabermath/registry.py` | Every model key, its processor recipe, its input protocol |
 | `src/sabermath/runner.py` | Running one (model, prompt) cell, with checkpointing |
 | `src/sabermath/results.py` | Reading `results/`: filename grammar and protocol precedence |
-| `src/sabermath/reporting/` | Table generators, one module per table |
-| `src/sabermath/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, latency and math-vs-word figures, benchmark composition |
+| `src/sabermath/tables.py` | Shared table-building: reading runs into rows, model metadata |
 | `src/sabermath/shards.py` | Splitting one run across jobs, and stitching it back |
 | `scripts/` | Every entrypoint, and nothing else — the package itself is import-only |
+| `scripts/analysis/` | Standalone analyses: rescaling robustness, MTEB correlation, confidence intervals, dedup and math-vs-word |
+| `scripts/plots/` | Every figure: latency-vs-quality, math-vs-word, benchmark composition |
+| `scripts/tables/` | Table generators, one module per table, run by `report_experiments.py` |
 | `scripts/envs/` | The five conda environments, one per conflicting pin set |
 | `results/` | Every result (see below) |
 | `docs/` | Per-experiment write-ups and protocol notes (see [Documentation](#documentation)) |
