@@ -122,41 +122,18 @@ def clean_for_pya0(value) -> str:
     return value
 
 
-"""
-def split_text_and_latex(s: str):
+
+
+
+def split_text_and_latex(s: str, keep_delimiters: bool = False):
+    # keep_delimiters=True leaves the $...$ / \[...\] markers inside the tex
+    # chunk, so to_pya0_document emits "[imath]$x$[/imath]" rather than
+    # "[imath]x[/imath]". Only sabermath.analysis.math_vs_word.sim_approach0
+    # passes it, to reproduce its committed numbers - see its call site.
     s = clean_for_pya0(s)
 
-    combined = "|".join(f"({p})" for p in LATEX_PATTERNS)
-    regex = re.compile(combined, flags=re.DOTALL)
-
-    chunks = []
-    last = 0
-
-    for m in regex.finditer(s):
-        if m.start() > last:
-            text = s[last:m.start()].strip()
-            if text:
-                chunks.append(("term", text))
-
-        latex = next(g for g in m.groups() if g is not None).strip()
-        if latex:
-            chunks.append(("tex", latex))
-
-        last = m.end()
-
-    if last < len(s):
-        text = s[last:].strip()
-        if text:
-            chunks.append(("term", text))
-
-    return chunks
-"""
-
-
-def split_text_and_latex(s: str):
-    s = clean_for_pya0(s)
-
-    combined = "|".join(f"(?:{p})" for p in LATEX_PATTERNS)
+    fmt = "({})" if keep_delimiters else "(?:{})"
+    combined = "|".join(fmt.format(p) for p in LATEX_PATTERNS)
     regex = re.compile(combined, flags=re.DOTALL)
 
     chunks = []
@@ -182,12 +159,9 @@ def split_text_and_latex(s: str):
     return chunks
 
 
-def to_pya0_document(problem: str) -> str:
-    """
-    PyA0 indexing expects math in [imath]...[/imath] blocks.
-    """
+def to_pya0_document(problem: str, keep_delimiters: bool = False) -> str:
     parts = []
-    for kind, value in split_text_and_latex(problem):
+    for kind, value in split_text_and_latex(problem, keep_delimiters):
         if kind == "term":
             parts.append(value)
         else:
@@ -195,21 +169,21 @@ def to_pya0_document(problem: str) -> str:
     return " ".join(parts)
 
 
-def to_pya0_query(problem: str):
+def to_pya0_query(problem: str, keep_delimiters: bool = False):
     query = []
-    for kind, value in split_text_and_latex(problem):
+    for kind, value in split_text_and_latex(problem, keep_delimiters):
         if value:
             query.append({"str": value, "type": kind})
     return query
 
 
-def build_pya0_index(problems: list[str], index_dir: str, q):
+def build_pya0_index(problems: list[str], index_dir: str, keep_delimiters: bool = False):
     with silence_native_output():
         idx = pya0.index_open(index_dir, option="w")
         writer = pya0.index_writer(idx)
 
         for i, problem in enumerate(problems):
-            content = to_pya0_document(problem)
+            content = to_pya0_document(problem, keep_delimiters)
 
             # Store the original Python index in the URL field for easy recovery.
             pya0.writer_add_doc(
@@ -229,9 +203,14 @@ def search_pya0_index(
     target: str,
     index_dir: str,
     topk: int,
+    keep_delimiters: bool = False,
 ):
+    # A query on this list segfaults pya0's engine, taking the process with it.
+    if md5(target) in _BROKEN_QUERIES:
+        return None
+
     idx = pya0.index_open(index_dir, option="r")
-    query = to_pya0_query(target)
+    query = to_pya0_query(target, keep_delimiters)
 
     raw = pya0.search(
         idx,
@@ -326,7 +305,7 @@ class Approach0Processor(ModelProcessor):
             cleanup = False
 
         try:
-            build_pya0_index(documents, index_dir, q=query)
+            build_pya0_index(documents, index_dir)
 
             hits = search_pya0_index(
                 problems=documents,

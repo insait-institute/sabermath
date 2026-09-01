@@ -1,0 +1,102 @@
+{
+  "qwen3-reranker-8b": {
+    "verdict": "UNTESTED"
+  },
+  "qwen3-reranker-4b": {
+    "verdict": "UNTESTED"
+  },
+  "qwen3-reranker-0.6b": {
+    "verdict": "UNTESTED"
+  },
+  "rader-reranker-7b": {
+    "verdict": "UNTESTED"
+  },
+  "reasonir-8b": {
+    "verdict": "UNTESTED"
+  },
+  "reason-embed-qwen3-8b": {
+    "verdict": "UNTESTED"
+  },
+  "diver-retriever-4b": {
+    "verdict": "UNTESTED"
+  },
+  "diver-retriever-0.6b": {
+    "verdict": "UNTESTED"
+  },
+  "rader-3b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.999390243902439,
+    "per_query_spearman": [
+      0.999624765478424,
+      0.9994371482176361,
+      0.999249530956848,
+      0.999249530956848
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0004371566905751745,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-7b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9978424015009382,
+    "per_query_spearman": [
+      0.9938086303939963,
+      0.9986866791744841,
+      0.9994371482176361,
+      0.9994371482176361
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.014847438482034805,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-14b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9978424015009382,
+    "per_query_spearman": [
+      0.9949343339587242,
+      0.999624765478424,
+      0.99906191369606,
+      0.9977485928705441
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.01895804973349409,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "roberta-base": {
+    "verdict": "UNTESTED"
+  },
+  "bert-base-uncased": {
+    "verdict": "UNTESTED"
+  },
+  "multilingual-e5-large": {
+    "verdict": "UNTESTED"
+  },
+  "embeddinggemma-300m": {
+    "verdict": "UNTESTED"
+  },
+  "jina-embeddings-v5-text-nano": {
+    "verdict": "UNTESTED"
+  },
+  "jina-embeddings-v5-text-small": {
+    "verdict": "UNTESTED"
+  },
+  "splade-code-8b": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "SPLADE scoring needs max-over-positions of log(1+ReLU(MLM vocab logits)) - vLLM's pooling runner has no sparse/MLM-head pooler, so there is nothing faithful to test"
+  },
+  "splade-code-0.6b": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "same as splade-code-8b"
+  },
+  "gte-moderncolbert": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "late interaction needs per-token vectors passed through PyLate's Dense projection then MaxSim - vLLM's pooling runner returns one pooled vector and never applies the projection module"
+  },
+  "reason-moderncolbert": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "same as gte-moderncolbert"
+  }
+}

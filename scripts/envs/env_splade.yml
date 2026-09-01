@@ -1,0 +1,11 @@
+# For: splade-code-8b
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install datasets numpy sentence_transformers peft
+  pip install -e "$SABERMATH_REPO"

@@ -1,13 +1,17 @@
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import Callable, Literal, get_args
 from pathlib import Path
-import re
+import json
 
 import numpy as np
 from tqdm import tqdm
 from datasets import Dataset
 
 from sabermath.data import load_data
+from sabermath.instructions import (
+    DEFAULT_INSTRUCTION_TEMPLATE,
+    format_instructed_query,
+)
 from sabermath.metrics import compute_ndcg_at_k
 from sabermath.schemas import (
     Task,
@@ -19,7 +23,6 @@ from sabermath.schemas import (
 )
 from sabermath.processors import (
     ModelProcessor,
-    EmbeddingProcessor,
     SentenceTransformersProcessor as STProcessor,
     VLLMProcessor,
     UnknownProcessor,
@@ -34,6 +37,56 @@ def _ensure_dir(file_path: str | Path) -> None:
     parent = path.parent
     if parent != Path():
         parent.mkdir(parents=True, exist_ok=True)
+
+
+def _load_checkpoint(path: str | Path | None) -> dict[int, float | None]:
+    if path is None:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {int(k): v for k, v in raw.items()}
+
+
+def _save_checkpoint(
+    path: str | Path | None, all_ndcgs_by_idx: dict[int, float | None]
+) -> None:
+    if path is None:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps({str(k): v for k, v in all_ndcgs_by_idx.items()}))
+    tmp.replace(p)
+
+
+def _load_scores_checkpoint(path: str | Path | None) -> dict[int, dict | None]:
+    if path is None:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {int(k): v for k, v in raw.items()}
+
+
+def _save_scores_checkpoint(
+    path: str | Path | None, all_scores_by_idx: dict[int, dict | None]
+) -> None:
+    if path is None:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps({str(k): v for k, v in all_scores_by_idx.items()}))
+    tmp.replace(p)
 
 
 def _naive_type_check(obj, module: str, name: str) -> bool:
@@ -89,12 +142,17 @@ class TaskSettings:
     dcg_variant: Literal["linear", "exponent"] | None
     show_progress_bar: bool
     scores_kwargs: dict
+    query_instruction: str | None = None
+    instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE
 
 
 def evaluate_task(
     name: Task,
     settings: TaskSettings,
     return_ndcgs: bool = False,
+    checkpoint_path: str | Path | None = None,
+    on_progress: Callable[[], None] | None = None,
+    scores_path: str | Path | None = None,
 ) -> TaskResult:
     queries_ds = settings.queries_ds
     documents_ds = settings.documents_ds
@@ -104,20 +162,50 @@ def evaluate_task(
     show_progress_bar = settings.show_progress_bar
     scores_kwargs = settings.scores_kwargs
 
-    ndcgs = []
-    all_ndcgs = []
-    ndcg_by_query_idx = {}
-
     query_version = "full" if name == "full-full" else "statement"
     document_version = "statement" if name == "statement-statement" else "full"
 
     queries = transform(queries_ds, query_version)
+
+    if settings.query_instruction is not None:
+        queries = [
+            format_instructed_query(
+                settings.query_instruction, q, settings.instruction_template
+            )
+            for q in queries
+        ]
+
+    all_ndcgs_by_idx: dict[int, float | None] = _load_checkpoint(checkpoint_path)
+    ndcg_by_query_idx: dict[int, float] = {
+        i: v for i, v in all_ndcgs_by_idx.items() if v is not None
+    }
+
+    all_scores_by_idx: dict[int, dict | None] = _load_scores_checkpoint(scores_path)
+
+    if all_ndcgs_by_idx:
+        print(
+            f"[~] Resuming task '{name}' from checkpoint: "
+            f"{len(all_ndcgs_by_idx)}/{len(queries)} queries already scored."
+        )
+        if scores_path is not None:
+            missing_scores = [
+                i for i in all_ndcgs_by_idx if i not in all_scores_by_idx
+            ]
+            if missing_scores:
+                print(
+                    f"[!!] {len(missing_scores)} resumed queries have no stored "
+                    f"scores in {scores_path} - their raw scores are "
+                    f"unrecoverable without a fresh checkpoint dir."
+                )
 
     for i, query in tqdm(
         enumerate(queries),
         total=len(queries),
         disable=not show_progress_bar,
     ):
+        if i in all_ndcgs_by_idx:
+            continue  # already scored - loaded from checkpoint
+
         doc_ids = list(queries_ds[i]["candidates"])
         relevance_scores = list(queries_ds[i]["relevance_scores"])
 
@@ -130,22 +218,38 @@ def evaluate_task(
         )
 
         if model_scores is None:
-            all_ndcgs.append(None)
-            continue
+            all_ndcgs_by_idx[i] = None
+            if scores_path is not None:
+                all_scores_by_idx[i] = None
+        else:
+            model_ranked_local_idxs = np.argsort(-np.asarray(model_scores))
 
-        model_ranked_local_idxs = np.argsort(-np.asarray(model_scores))
+            model_ranked_relevance_scores = np.asarray(relevance_scores)[
+                model_ranked_local_idxs
+            ]
+            ndcg = compute_ndcg_at_k(
+                model_ranked_relevance_scores, k=k, variant=dcg_variant
+            )
+            all_ndcgs_by_idx[i] = ndcg
+            ndcg_by_query_idx[i] = ndcg
+            if scores_path is not None:
+                all_scores_by_idx[i] = {
+                    "scores": [float(s) for s in model_scores],
+                    "ranking": [int(j) for j in model_ranked_local_idxs],
+                }
 
-        model_ranked_relevance_scores = np.asarray(relevance_scores)[
-            model_ranked_local_idxs
-        ]
-        ndcg = compute_ndcg_at_k(
-            model_ranked_relevance_scores, k=k, variant=dcg_variant
-        )
-        ndcgs.append(ndcg)
-        all_ndcgs.append(ndcg)
-        ndcg_by_query_idx[i] = ndcg
+        if scores_path is not None:
+            _save_scores_checkpoint(scores_path, all_scores_by_idx)
 
-    ndcgs = np.asarray(ndcgs)
+        # Written after every query so a killed job loses at most the query
+        # currently in flight, never the whole task's progress.
+        _save_checkpoint(checkpoint_path, all_ndcgs_by_idx)
+
+        if on_progress is not None:
+            on_progress()
+
+    all_ndcgs = [all_ndcgs_by_idx.get(i) for i in range(len(queries))]
+    ndcgs = np.asarray(list(ndcg_by_query_idx.values()))
     ndcg_at_k = float(ndcgs.mean()) if ndcgs.size > 0 else 0.0
 
     BRANCHES = get_args(Branch)
@@ -226,24 +330,30 @@ def evaluate(
     tasks: list[Task] | None = None,
     k: int = 10,
     *,
-    # Init na Run Config
     dcg_variant: DCGVariant = "exponent",
     use_vllm: bool = False,
     init_kwargs: dict | None = None,
     scores_kwargs: dict | None = None,
-    # Printing Config
+    # Resume Config: if set, per-query nDCGs are checkpointed to
+    # "{checkpoint_dir}/{task}.json" after every query and reloaded from
+    # there on start, so an interrupted run (e.g. a job timeout) can be
+    # resumed instead of restarting from query 0. Don't reuse a
+    # checkpoint_dir across runs with a different queries_ds (e.g. after
+    # changing --n / a query subsample) - checkpoints are keyed by query
+    # position, not content.
+    checkpoint_dir: str | Path | None = None,
+    on_progress: Callable[[], None] | None = None,
+    instruction: str | None = None,
+    instruction_template: str = DEFAULT_INSTRUCTION_TEMPLATE,
+    save_scores: bool = False,
     verbose: bool = True,
     show_progress_bars: bool = True,
-    #       ! USE WITH CAUTION !
-    # ARGUMENTS BELOW ARE FOR DEV PURPOSES
-    # Cache Config
+    # Below here: development arguments, not part of the published protocol.
     cache_path: str | None = None,
     allow_export_cache: bool = True,
     allow_load_cache: bool = True,
-    # Benchmark Data Setting (Queries & Documents)
     queries: Dataset | None = None,
     documents: Dataset | None = None,
-    # Direct Input/Output
     return_ndcgs: bool = False,
     no_init: bool = False,
 ) -> Report:
@@ -256,6 +366,9 @@ def evaluate(
 
     if dcg_variant not in get_args(DCGVariant):
         raise ValueError(f"Invalid DCG variant: {dcg_variant}")
+
+    if save_scores and checkpoint_dir is None:
+        raise ValueError("save_scores requires checkpoint_dir")
 
     def vprint(text: str) -> None:
         if verbose:
@@ -303,6 +416,25 @@ def evaluate(
         except Exception as e:
             vprint(f"[-] Failed to load cache: {e}")
 
+    query_instruction = None
+
+    if instruction is not None:
+        if load_cache:
+            vprint(
+                "[~] Warning: instructed queries are new cache keys - a "
+                "preloaded vector cache only serves the document side."
+            )
+        vprint(
+            f"[~] Setting instruction ({instruction_template} template): "
+            f"{instruction}"
+        )
+        # The instruction wraps the QUERY TEXT at scoring time (see
+        # TaskSettings.query_instruction), never the dataset's problem column:
+        # the column route mutated the input before the task transform, so the
+        # same prompt produced different strings per task.
+        query_instruction = instruction
+        vprint("[+] Instruction set.")
+
     settings = TaskSettings(
         queries_ds=queries,
         documents_ds=documents,
@@ -311,13 +443,32 @@ def evaluate(
         dcg_variant=dcg_variant,
         show_progress_bar=show_progress_bars,
         scores_kwargs=scores_kwargs,
+        query_instruction=query_instruction,
+        instruction_template=instruction_template,
     )
 
     ndcgs = {}
 
+    def _checkpoint_path(task_name: str) -> str | None:
+        if checkpoint_dir is None:
+            return None
+        return str(Path(checkpoint_dir) / f"{task_name}.json")
+
+    def _scores_path(task_name: str) -> str | None:
+        if checkpoint_dir is None or not save_scores:
+            return None
+        return str(Path(checkpoint_dir) / f"{task_name}.scores.json")
+
     if "statement-statement" in tasks:
         vprint('[~] Evaluating on task "statement vs. statement"...')
-        st_st_res, st_st_ndcgs = evaluate_task("statement-statement", settings, True)
+        st_st_res, st_st_ndcgs = evaluate_task(
+            "statement-statement",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("statement-statement"),
+            on_progress=on_progress,
+            scores_path=_scores_path("statement-statement"),
+        )
         ndcgs["statement-statement"] = st_st_ndcgs
         ndcg_at_k = st_st_res.ndcg_at_k
         vprint(f"[+] Statement-statement nDCG@{k} ({dcg_variant}): {ndcg_at_k}")
@@ -325,7 +476,14 @@ def evaluate(
 
     if "statement-full" in tasks:
         vprint('[~] Evaluating on task "statement vs. full statement + solution"...')
-        st_fl_res, st_fl_ndcgs = evaluate_task("statement-full", settings, True)
+        st_fl_res, st_fl_ndcgs = evaluate_task(
+            "statement-full",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("statement-full"),
+            on_progress=on_progress,
+            scores_path=_scores_path("statement-full"),
+        )
         ndcgs["statement-full"] = st_fl_ndcgs
         ndcg_at_k = st_fl_res.ndcg_at_k
         vprint(f"[+] Statement-full nDCG@{k} ({dcg_variant}): {ndcg_at_k}")
@@ -336,7 +494,14 @@ def evaluate(
             '[~] Evaluating on task "full problem + solution vs. '
             'full problem + solution"...'
         )
-        fl_fl_res, fl_fl_ndcgs = evaluate_task("full-full", settings, True)
+        fl_fl_res, fl_fl_ndcgs = evaluate_task(
+            "full-full",
+            settings,
+            True,
+            checkpoint_path=_checkpoint_path("full-full"),
+            on_progress=on_progress,
+            scores_path=_scores_path("full-full"),
+        )
         ndcgs["full-full"] = fl_fl_ndcgs
         ndcg_at_k = fl_fl_res.ndcg_at_k
         vprint(f"[+] Full-full nDCG@{k} ({dcg_variant}): {ndcg_at_k}")

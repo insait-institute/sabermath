@@ -1,0 +1,38 @@
+{
+  "n": 20,
+  "seed": 42,
+  "expected_anchors": {
+    "standalone(prompt-less)": {
+      "statement-statement": 0.5176,
+      "statement-full": 0.5354,
+      "full-full": 0.6083
+    },
+    "prefix+rewrite(=inf-x)": {
+      "statement-statement": 0.4376,
+      "statement-full": 0.4765,
+      "full-full": 0.5283
+    }
+  },
+  "results": {
+    "standalone(prompt-less)": {
+      "statement-statement": 0.5176,
+      "statement-full": 0.5354,
+      "full-full": 0.6083
+    },
+    "prefix-only": {
+      "statement-statement": 0.5266,
+      "statement-full": 0.5891,
+      "full-full": 0.6272
+    },
+    "rewrite-only": {
+      "statement-statement": 0.4331,
+      "statement-full": 0.4492,
+      "full-full": 0.5008
+    },
+    "prefix+rewrite(=inf-x)": {
+      "statement-statement": 0.4385,
+      "statement-full": 0.4751,
+      "full-full": 0.527
+    }
+  }
+}

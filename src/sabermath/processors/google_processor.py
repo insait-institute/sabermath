@@ -70,14 +70,24 @@ class GoogleProcessor(EmbeddingProcessor):
     def _concat(self, batches: list[list[list[float]]]) -> list[list[float]]:
         return [item for batch in batches for item in batch]
 
+    def _embed_config(self, task_type: str | None):
+        if task_type is None:
+            return None
+        from google.genai import types
+
+        return types.EmbedContentConfig(task_type=task_type)
+
     async def _encode_batch(
         self,
         texts: list[str],
         sem: asyncio.Semaphore,
         *,
         retries: int = 9,
+        task_type: str | None = None,
     ) -> list[list[float]]:
         last_error: Exception | None = None
+        config = self._embed_config(task_type)
+        config_kwargs = {} if config is None else {"config": config}
 
         for attempt in range(retries):
             try:
@@ -85,6 +95,7 @@ class GoogleProcessor(EmbeddingProcessor):
                     response = await self._client.aio.models.embed_content(
                         model=self._model_name,
                         contents=texts,
+                        **config_kwargs,
                     )
 
                     if response.embeddings is None:
@@ -96,6 +107,13 @@ class GoogleProcessor(EmbeddingProcessor):
 
             except Exception as e:
                 last_error = e
+
+                status = getattr(e, "code", None) or getattr(e, "status_code", None)
+                if status in (401, 403):
+                    raise RuntimeError(
+                        f"Gemini auth error ({status}) - not retrying; check "
+                        "GEMINI_API_KEY / .geminitok."
+                    ) from e
 
                 if attempt < retries - 1:
                     await asyncio.sleep(2**attempt)
@@ -111,18 +129,32 @@ class GoogleProcessor(EmbeddingProcessor):
         *,
         retries: int = 9,
         batch_size: int = 100,
-        max_concurrency: int = 20,
+        max_concurrency: int | None = None,
+        task_type: str | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
+        # max_concurrency=None means "use the default (20)". The distinction
+        # matters for gemini-embedding-2: its per-request batch is capped at 1
+        # by the API, and the x1.2 boost below compensates the lost
+        # within-request parallelism - but only for the DEFAULT. An explicitly
+        # passed value (e.g. the timing harness's 16, standardizing documents
+        # in flight) must be honored exactly, never inflated.
+        explicit_concurrency = max_concurrency is not None
+        if max_concurrency is None:
+            max_concurrency = 20
+
         if self._model_name.startswith("gemini-embedding-2"):
             batch_size = 1
-            max_concurrency = math.ceil(max_concurrency * 1.2)
+            if not explicit_concurrency:
+                max_concurrency = math.ceil(max_concurrency * 1.2)
 
         sem = asyncio.Semaphore(max_concurrency)
         batches = list(self._split_to_batches(texts, batch_size))
 
         coros = [
-            self._encode_batch(batch, sem, retries=retries, **kwargs)
+            self._encode_batch(
+                batch, sem, retries=retries, task_type=task_type, **kwargs
+            )
             for batch in batches
         ]
 
@@ -142,7 +174,8 @@ class GoogleProcessor(EmbeddingProcessor):
         *,
         retries: int = 9,
         batch_size: int = 100,
-        max_concurrency: int = 20,
+        max_concurrency: int | None = None,
+        task_type: str | None = None,
         **kwargs: Any,
     ) -> np.ndarray:
         try:
@@ -155,6 +188,7 @@ class GoogleProcessor(EmbeddingProcessor):
                     retries=retries,
                     batch_size=batch_size,
                     max_concurrency=max_concurrency,
+                    task_type=task_type,
                     **kwargs,
                 )
             )

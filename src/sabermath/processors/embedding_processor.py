@@ -7,6 +7,31 @@ import numpy as np
 
 from .base import ModelProcessor
 
+AFFIX_KEYS = (
+    "query_prompt",
+    "document_prompt",
+    "query_suffix",
+    "document_suffix",
+    "query_encode_kwargs",
+    "document_encode_kwargs",
+)
+
+
+def split_affix_kwargs(kwargs: dict) -> tuple[dict, dict]:
+    affixes = {k: v for k, v in kwargs.items() if k in AFFIX_KEYS}
+    rest = {k: v for k, v in kwargs.items() if k not in AFFIX_KEYS}
+    return affixes, rest
+
+
+def apply_affixes(
+    texts: list[str], prompt: str | None, suffix: str | None
+) -> list[str]:
+    if not prompt and not suffix:
+        return list(texts)
+    head = prompt or ""
+    tail = suffix or ""
+    return [f"{head}{text}{tail}" for text in texts]
+
 
 class EmbeddingProcessor(ModelProcessor):
     @classmethod
@@ -48,6 +73,44 @@ class EmbeddingProcessor(ModelProcessor):
         else:
             self._vector_cache.update(cache)
 
+    def _encode_side(
+        self,
+        texts: list[str],
+        *,
+        tag: str | None,
+        show_progress_bar: bool,
+        check_cache: bool,
+        update_cache: bool,
+        encode_kwargs: dict,
+    ) -> list:
+        def key(text: str):
+            return text if tag is None else (tag, text)
+
+        embeddings: list = [None for _ in texts]
+        encode_texts: list[str] = []
+        idx_map: list[int] = []
+
+        for i, text in enumerate(texts):
+            if check_cache and key(text) in self._vector_cache:
+                embeddings[i] = self._vector_cache[key(text)]
+            else:
+                encode_texts.append(text)
+                idx_map.append(i)
+
+        if encode_texts:
+            new_emb = self.encode(
+                encode_texts,
+                show_progress_bar=show_progress_bar,
+                **encode_kwargs,
+            )
+            if check_cache and update_cache:
+                for text, emb in zip(encode_texts, new_emb):
+                    self._vector_cache[key(text)] = emb
+            for idx, emb in zip(idx_map, new_emb):
+                embeddings[idx] = emb
+
+        return embeddings
+
     def get_scores(
         self,
         query: str,
@@ -56,10 +119,31 @@ class EmbeddingProcessor(ModelProcessor):
         show_progress_bar: bool = True,
         check_cache: bool = True,
         update_cache: bool = True,
+        query_prompt: str | None = None,
+        document_prompt: str | None = None,
+        query_suffix: str | None = None,
+        document_suffix: str | None = None,
+        query_encode_kwargs: dict | None = None,
+        document_encode_kwargs: dict | None = None,
         **kwargs,
     ) -> list[float]:
         if not hasattr(self, "_vector_cache"):
             self._vector_cache = {}
+
+        query = apply_affixes([query], query_prompt, query_suffix)[0]
+        documents = apply_affixes(documents, document_prompt, document_suffix)
+
+        if query_encode_kwargs or document_encode_kwargs:
+            return self._get_scores_per_side(
+                query,
+                documents,
+                show_progress_bar=show_progress_bar,
+                check_cache=check_cache,
+                update_cache=update_cache,
+                query_encode_kwargs=query_encode_kwargs or {},
+                document_encode_kwargs=document_encode_kwargs or {},
+                **kwargs,
+            )
 
         N_d = len(documents)
 
@@ -103,11 +187,48 @@ class EmbeddingProcessor(ModelProcessor):
 
         return scores
 
+    def _get_scores_per_side(
+        self,
+        query: str,
+        documents: list[str],
+        *,
+        show_progress_bar: bool,
+        check_cache: bool,
+        update_cache: bool,
+        query_encode_kwargs: dict,
+        document_encode_kwargs: dict,
+        **kwargs,
+    ) -> list[float]:
+        def side_tag(side_kwargs: dict) -> str | None:
+            if not side_kwargs:
+                return None
+            return "|".join(f"{k}={side_kwargs[k]}" for k in sorted(side_kwargs))
+
+        document_embeddings = self._encode_side(
+            documents,
+            tag=side_tag(document_encode_kwargs),
+            show_progress_bar=show_progress_bar,
+            check_cache=check_cache,
+            update_cache=update_cache,
+            encode_kwargs={**kwargs, **document_encode_kwargs},
+        )
+        query_embedding = self._encode_side(
+            [query],
+            tag=side_tag(query_encode_kwargs),
+            show_progress_bar=show_progress_bar,
+            check_cache=check_cache,
+            update_cache=update_cache,
+            encode_kwargs={**kwargs, **query_encode_kwargs},
+        )[0]
+
+        return self._cosine_similarity(
+            np.asarray(query_embedding), np.asarray(document_embeddings)
+        )
+
     @abstractmethod
     def encode(
         self, texts: list[str], show_progress_bar: bool = True, **kwargs
     ) -> np.ndarray:
-        """Encode a list of texts into a list of vectors."""
         pass
 
     def encode_statements(

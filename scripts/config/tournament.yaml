@@ -1,0 +1,18 @@
+# Defaults for scripts/analysis/inversions.py and signal_effect.py. Every
+# entry is a public dataset; override any of them with --config-file, or the
+# matching command-line flag.
+hf_datasets:
+  # Targets carrying the indices of the candidates our selection algorithm chose.
+  original_targets_dataset: "RAG4Math/balanced_selection_targets_reduced"
+  # The candidates those targets point at.
+  original_candidates_dataset: "RAG4Math/balanced_selection_candidates_reduced"
+  # Targets with the final relevance score for each candidate.
+  targets_relevances_computed: "RAG4Math/targets_relevances_computed"
+  # The subset that went to human annotators.
+  targets_human_eval: "RAG4Math/targets_human_eval"
+
+prompts_pairwise_comparison:
+  no-ties: "build_benchmark/generate_scores/prompts/prompt_no_ties.txt"
+
+swiss_tournament:
+  matches_save_file: "results/construction/matches_res_save.csv"

@@ -1,0 +1,246 @@
+{
+  "qwen3-reranker-8b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9990501323355034,
+    "per_query_spearman": [
+      0.9983582730622802,
+      0.9984051080620978,
+      0.9994371482176361,
+      1.0
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.01477220698727455,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "qwen3-reranker-4b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9991908892869892,
+    "per_query_spearman": [
+      0.998874296435272,
+      0.999624765478424,
+      0.9990149642774123,
+      0.999249530956848
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.026404994781618285,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "qwen3-reranker-0.6b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9989915341199099,
+    "per_query_spearman": [
+      0.99812382739212,
+      0.9989680126522476,
+      0.999624765478424,
+      0.999249530956848
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.015119842715576981,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-reranker-7b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9969376030327983,
+    "per_query_spearman": [
+      0.9986392894674658,
+      0.997935206121451,
+      0.9930059961339888,
+      0.9981699204082878
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.007642294543020886,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "reasonir-8b": {
+    "verdict": "NEAR-MATCH",
+    "mean_spearman": 0.9913227016885554,
+    "per_query_spearman": [
+      0.9810506566604128,
+      0.9958724202626642,
+      0.9975609756097561,
+      0.9908067542213884
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.0014384934975413544,
+    "sample_fingerprint_mismatch": false,
+    "note": "minor drift - inspect before switching"
+  },
+  "reason-embed-qwen3-8b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9999530956848031,
+    "per_query_spearman": [
+      0.999812382739212,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "diver-retriever-4b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.999343339587242,
+    "per_query_spearman": [
+      0.997936210131332,
+      0.999812382739212,
+      0.999812382739212,
+      0.999812382739212
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.002150955271449956,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "diver-retriever-0.6b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9989212007504691,
+    "per_query_spearman": [
+      0.9977485928705441,
+      0.9994371482176361,
+      0.999812382739212,
+      0.9986866791744841
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.0055163341249644116,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-3b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9999530956848031,
+    "per_query_spearman": [
+      1.0,
+      1.0,
+      0.999812382739212,
+      1.0
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-7b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.999906191369606,
+    "per_query_spearman": [
+      0.999624765478424,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "min_top10_overlap": 0.9,
+    "mean_abs_ndcg10_delta": 0.0030530070677481924,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "rader-14b": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9999061913696061,
+    "per_query_spearman": [
+      1.0,
+      1.0,
+      0.999812382739212,
+      0.999812382739212
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 3.8566775109369344e-05,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "roberta-base": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9999530956848031,
+    "per_query_spearman": [
+      1.0,
+      0.999812382739212,
+      1.0,
+      1.0
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 6.406196268868986e-05,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "bert-base-uncased": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 1.0,
+    "per_query_spearman": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "multilingual-e5-large": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.9999530956848031,
+    "per_query_spearman": [
+      1.0,
+      0.999812382739212,
+      1.0,
+      1.0
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "embeddinggemma-300m": {
+    "verdict": "FEASIBLE",
+    "mean_spearman": 0.999671669793621,
+    "per_query_spearman": [
+      0.9994371482176361,
+      0.999624765478424,
+      0.999812382739212,
+      0.999812382739212
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.0020436912395038614,
+    "sample_fingerprint_mismatch": false,
+    "note": "rankings match the production path"
+  },
+  "jina-embeddings-v5-text-nano": {
+    "verdict": "INFEASIBLE",
+    "error": "Engine core initialization failed. See root cause above. Failed core proc(s): {}"
+  },
+  "jina-embeddings-v5-text-small": {
+    "verdict": "NEAR-MATCH",
+    "mean_spearman": 0.9931519699812383,
+    "per_query_spearman": [
+      0.9911819887429644,
+      0.9909943714821764,
+      0.9960600375234522,
+      0.9943714821763602
+    ],
+    "min_top10_overlap": 1.0,
+    "mean_abs_ndcg10_delta": 0.008858169235216568,
+    "sample_fingerprint_mismatch": false,
+    "note": "minor drift - inspect before switching"
+  },
+  "splade-code-8b": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "SPLADE scoring needs max-over-positions of log(1+ReLU(MLM vocab logits)) - vLLM's pooling runner has no sparse/MLM-head pooler, so there is nothing faithful to test"
+  },
+  "splade-code-0.6b": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "same as splade-code-8b"
+  },
+  "gte-moderncolbert": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "late interaction needs per-token vectors passed through PyLate's Dense projection then MaxSim - vLLM's pooling runner returns one pooled vector and never applies the projection module"
+  },
+  "reason-moderncolbert": {
+    "verdict": "NO-VLLM-PATH",
+    "why": "same as gte-moderncolbert"
+  }
+}

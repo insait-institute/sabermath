@@ -1,0 +1,12 @@
+# For: gte-moderncolbert, reason-moderncolbert (both need pylate).
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install "pylate==1.6.0" datasets numpy
+  pip install -e "$SABERMATH_REPO"
+  pip install "sentence-transformers==5.3.0"

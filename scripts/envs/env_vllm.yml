@@ -1,0 +1,11 @@
+# Shared environment
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - cuda-toolkit=12.9
+  - parallel
+postinstall: |
+  pip install numpy datasets "transformers==5.16.1" "vllm==0.26.0" "flashinfer-python==0.6.14" peft
+  pip install -e "$SABERMATH_REPO"

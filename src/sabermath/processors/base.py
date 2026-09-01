@@ -7,15 +7,12 @@ class ModelProcessor(ABC):
 
     @property
     def model(self) -> str | None:
-        """Return the name of the model being evaluated."""
         return None
 
     def export_cache(self, path: str) -> None:
-        """Export any internal cache to a file."""
         raise NotImplemented
 
     def import_cache(self, path: str) -> None:
-        """Import any internal cache from a file."""
         raise NotImplemented
 
     @abstractmethod
