@@ -35,7 +35,7 @@ from sabermath.math_vs_word.aggregate import (
     build_id_to_domain,
     load_similarity_content,
 )
-from sabermath.math_vs_word.models import NON_EMBEDDING_METHODS, all_methods
+from sabermath.math_vs_word.models import LEXICAL_METHODS, all_methods
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 DEFAULT_CONFIG = CONFIG_DIR / "math_vs_word.yaml"
@@ -99,11 +99,10 @@ def collect(sim_dir: Path, methods: list[str], id_to_domain=None) -> dict:
 
 
 def ordered_methods(stats: dict, methods: list[str]) -> list[str]:
-    """Instructable methods, best baseline first - the paper's ordering."""
     rows = [
         model_id
         for model_id in methods
-        if model_id not in NON_EMBEDDING_METHODS
+        if model_id not in LEXICAL_METHODS
         and any((model_id, instruction) in stats for instruction in INSTRUCTIONS)
     ]
     return sorted(
@@ -141,7 +140,7 @@ def markdown(stats: dict, ordered: list[str], missing: list[str]) -> str:
 
     controls = sorted(
         model_id
-        for model_id in NON_EMBEDDING_METHODS
+        for model_id in LEXICAL_METHODS
         if (model_id, "p0") in stats
     )
     if controls:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sabermath.math_vs_word import SIMILARITIES_DIR
 from sabermath.math_vs_word.load_models import get_scores_kwargs
-from sabermath.math_vs_word.models import ALLOWED_MODELS, NON_EMBEDDING_METHODS
+from sabermath.math_vs_word.models import ALLOWED_MODELS, LEXICAL_METHODS
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
@@ -65,7 +65,7 @@ def main(argv=None) -> None:
     )
     args = parser.parse_args(argv)
 
-    methods = list(ALLOWED_MODELS) + NON_EMBEDDING_METHODS
+    methods = list(ALLOWED_MODELS) + LEXICAL_METHODS
     results = [(m, *inspect(m, args.sim_dir)) for m in methods]
 
     complete = [r for r in results if r[1] == "ok"]
@@ -97,12 +97,12 @@ def main(argv=None) -> None:
             )
 
     if args.instructions:
-        embedding_methods = [m for m in methods if m not in NON_EMBEDDING_METHODS]
+        instructable_methods = [m for m in methods if m not in LEXICAL_METHODS]
         print(f"\n{'=' * 68}\nInstruction ablation: "
-              f"{len(embedding_methods)} embedding methods x {len(args.instructions)} instructions")
+              f"{len(instructable_methods)} instructable methods x {len(args.instructions)} instructions")
         reusable, to_run, unknown = [], [], []
         for instruction in args.instructions:
-            for method in embedding_methods:
+            for method in instructable_methods:
                 status, _ = inspect(method, args.sim_dir, instruction)
                 if status == "ok":
                     continue

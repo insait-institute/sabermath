@@ -49,8 +49,8 @@ ALLOWED_MODELS = [
     "reason-rewriter-reason-embed-llama-3.1-8b",
 ]
 
-NON_EMBEDDING_METHODS = ["jaccard", "approach0", "tf-idf", "bm25"]
+LEXICAL_METHODS = ["bm25", "tf-idf", "jaccard", "approach0"]
 
 
 def all_methods() -> list[str]:
-    return list(ALLOWED_MODELS) + NON_EMBEDDING_METHODS
+    return list(ALLOWED_MODELS) + LEXICAL_METHODS
