@@ -6,9 +6,6 @@
 python -m pip install -e .
 ```
 
-Every script imports the installed package. Nothing under `src/` is runnable
-on its own. Most models additionally need a specific conda environment — see
-[experiment-evaluation.md](experiment-evaluation.md).
 
 ## Endpoints
 
@@ -18,11 +15,6 @@ on its own. Most models additionally need a specific conda environment — see
 | `scripts/run_dedup.py` | Where a rephrased copy of a query's own problem ranks | `results/dedup/` |
 | `scripts/run_timing.py` | Per-query latency on production backends | `results/timing/` |
 | `scripts/report_experiments.py` | Every table | `results/tables/` |
-
-Every analysis and figure is its own script under `scripts/analysis/` and
-`scripts/plots/`; `scripts/tables/` holds the generators
-`report_experiments.py` runs, and `scripts/config/` the two YAML configs they
-read. Each script's `--help` is the authoritative reference for its flags.
 
 ## Per-experiment pages
 

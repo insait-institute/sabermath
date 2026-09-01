@@ -1,14 +1,11 @@
 # nDCG evaluation
 
-Scores models across the three tasks and writes one JSON run per
-(model, prompt) into `results/evaluation/`.
+Scores models across the three tasks and writes one JSON run per (model, prompt) into `results/evaluation/`.
 
 ## Prerequisites
 
 - `python -m pip install -e .` — every script imports the installed package.
-- The environment that model family needs. Most models share
-  `scripts/envs/env_vllm.yml`; four families have conflicting pins and fail
-  loudly in the wrong one:
+- The environment that model family needs. Most models share `scripts/envs/env_vllm.yml`, except for:
 
   | Family | Environment |
   |---|---|
@@ -16,8 +13,6 @@ Scores models across the three tasks and writes one JSON run per
   | `splade-code-*` | `env_splade.yml` |
   | `inf-retriever-v1-pro`, `inf-x-retriever` | `env_inf_retriever.yml` |
   | `reasonir-8b` | `env_reasonir.yml` |
-
-  So run one model, or one same-env family, per invocation.
 - API keys for the closed models: `OPENAI_API_KEY`, `GEMINI_API_KEY`.
 
 ## Usage
@@ -30,11 +25,6 @@ python scripts/run_experiments.py --models rank1-32b --n 20     # 20-query smoke
 python scripts/run_experiments.py --prompts p0 p1 p2 p3         # the four instructions
 ```
 
-`--models` defaults to every model in the registry, `--prompts` to `p0`.
-`--help` is the authoritative flag reference.
-
-Re-running an identical command resumes from the last completed query.
-
 ### Splitting one run across jobs
 
 ```bash
@@ -46,14 +36,12 @@ python scripts/run_experiments.py --models rank1-32b --task statement-full \
 python scripts/run_experiments.py --models rank1-32b --query-shards 4 --query-shard 0
 
 # stitch the shards back
-python scripts/run_experiments.py --merge-shards                
-python scripts/run_experiments.py --merge-shards <part>.json ... 
-python scripts/run_experiments.py --merge-shards --dry-run      
+python scripts/run_experiments.py --merge-shards
+python scripts/run_experiments.py --merge-shards <part>.json ...
+python scripts/run_experiments.py --merge-shards --dry-run
 ```
 
-`--merge-shards` refuses to write when queries are missing from every part;
-pass `--allow-incomplete` to override. `scripts/run_dedup.py` takes the same
-pair of flags.
+`--merge-shards` refuses to write when queries are missing from every part; pass `--allow-incomplete` to override. `scripts/run_dedup.py` takes the same pair of flags.
 
 ### After a sweep
 
@@ -78,6 +66,4 @@ Each run file holds `domains` and `reports.<model>` with:
 | `ndcgs_by_task` | the per-query nDCG list the confidence intervals read |
 | `n_done` / `n_total` | **present only on an incomplete task** |
 
-A `--n`/`--seed` subset writes a suffixed file (`__n20_seed42`) and can never
-merge into a full run. Running a single `--task` merges into the model's file
-task by task rather than overwriting it.
+A `--n`/`--seed` subset writes a suffixed file (`__n20_seed42`) and can never merge into a full run. Running a single `--task` merges into the model's file task by task rather than overwriting it.

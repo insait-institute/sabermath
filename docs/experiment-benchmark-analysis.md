@@ -5,10 +5,7 @@ Sunburst charts of how the benchmark and its source corpus distribute across mat
 ## Prerequisites
 
 - `python -m pip install -e .` (needs `matplotlib`).
-- The Hugging Face dataset name, passed on the command line. The databank arm
-  expects `numeric` and `proofs` splits and derives each problem's domains
-  from its ontology tags; the benchmark arm reads the domains the dataset
-  already carries.
+- The Hugging Face dataset name, passed on the command line. The databank arm expects `numeric` and `proofs` splits and derives each problem's domains from its ontology tags; the benchmark arm reads the domains the dataset already carries.
 
 ## Usage
 
@@ -26,9 +23,7 @@ python scripts/plots/plot_candidates.py \
     --targ-idx <index>
 ```
 
-`plot_dataset.py` takes `--out-file` to override the destination;
-`plot_candidates.py` takes `--top-k` (default 10) for how many of the most
-relevant candidates to mark.
+`plot_dataset.py` takes `--out-file` to override the destination; `plot_candidates.py` takes `--top-k` (default 10) for how many of the most relevant candidates to mark.
 
 ## Output
 
@@ -36,7 +31,4 @@ relevant candidates to mark.
 |---|---|
 | `plot_dataset.py benchmark` | `piechart_benchmark.pdf` |
 | `plot_dataset.py databank` | `piechart_databank.pdf` |
-| `plot_candidates.py` | `math_dataset_sunburst.pdf`, for the given target index |
-
-Each chart has an inner ring of main mathematical domains and an outer ring of
-subdomains, with the problem count in the centre.
+| `plot_candidates.py` | `piechart_candidates_NT.pdf`, for the given target index|
