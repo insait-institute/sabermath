@@ -1,19 +1,4 @@
-# For: reasonir-8b.
-#
-# transformers is PINNED to the exact version the original
-# running-rerankers/reasonir.yml used - confirmed the hard way that
-# relaxing this to a floor (>=4.47.0, on the theory that it wouldn't fight
-# this package's own "sentence-transformers>=5.4.1") was wrong: it silently
-# resolved transformers==5.15.0, whose refactored RoPE config no longer
-# exposes `config.rope_theta` as a direct attribute - ReasonIR's own
-# trust_remote_code=True modeling code
-# (modeling_reasonir_8b.py:LlamaDecoderLayer.__init__) accesses exactly
-# that, so the model failed to even construct
-# (`AttributeError: 'LlamaConfig' object has no attribute 'rope_theta'`),
-# and the shell still exited 0 - the model run failed, not the script, so
-# nothing upstream noticed. Re-pinned to the exact
-# tested version and re-verified end-to-end (a real model load + score)
-# against it.
+# For: reasonir-8b
 channels:
   - conda-forge
   - nvidia

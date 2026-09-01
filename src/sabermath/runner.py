@@ -6,6 +6,9 @@ import json
 import random
 import sys
 import traceback
+import importlib.metadata as md
+import os
+import platform
 from pathlib import Path
 
 from .benchmark import evaluate, transform
@@ -209,6 +212,29 @@ def instructed_query_texts(
                 seen.add(text)
                 texts.append(text)
     return texts
+
+
+def runtime_versions() -> dict:
+    out = {"python": platform.python_version()}
+    for pkg in (
+        "torch",
+        "transformers",
+        "vllm",
+        "flashinfer-python",
+        "sentence-transformers",
+        "numpy",
+        "datasets",
+        "pylate",
+        "peft",
+    ):
+        try:
+            out[pkg] = md.version(pkg)
+        except md.PackageNotFoundError:
+            continue
+    for var in ("VLLM_USE_FLASHINFER_SAMPLER", "CUDA_VISIBLE_DEVICES"):
+        if var in os.environ:
+            out[var] = os.environ[var]
+    return out
 
 
 def assert_envelope_supported(model_key: str, processor, scores_kwargs: dict) -> None:
@@ -425,7 +451,13 @@ def run_model(
             print(tb)
 
         write_result(
-            filepath, model_key, output, extra_report_fields={"prompt": prompt_block}
+            filepath,
+            model_key,
+            output,
+            extra_report_fields={
+                "prompt": prompt_block,
+                "environment": runtime_versions(),
+            },
         )
         print(f"[+] Wrote {filepath}")
 
