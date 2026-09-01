@@ -10,9 +10,17 @@ Measures average per-query task time for every model in the results tables, into
 
 ## Usage
 
+Sample the shared query set once, before any per-model job:
+
+```bash
+python scripts/run_timing.py --generate-sample --n-queries 30
+```
+
+Then run the models. Every one reads that file, so `--n-queries`/`--seed` are ignored here, you can change them by re-running `--generate-sample` and then every model again.
+
 ```bash
 python scripts/run_timing.py --model rank1-32b
-python scripts/run_timing.py --model bm25 --n-queries 30
+python scripts/run_timing.py --model bm25
 python scripts/run_timing.py --model gemini-embedding-2
 ```
 

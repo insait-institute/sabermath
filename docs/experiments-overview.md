@@ -14,6 +14,10 @@ python -m pip install -e .
 | `OPENROUTER_API_KEY` | `text-embedding-3-small`, `text-embedding-3-large`, served through OpenRouter |
 | `HF_TOKEN` | writing the datasets that steps 1 and 2 of [experiment-math-vs-word.md](experiment-math-vs-word.md) produce |
 
+## Running on a GPU cluster
+
+If running on GPU, you might need to set `VLLM_USE_FLASHINFER_SAMPLER=0`, as flashinfer's JIT sampling kernel may fail to build.
+
 ## Endpoints
 
 | Script | Produces | Written to |
